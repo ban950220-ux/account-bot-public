@@ -160,7 +160,8 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     const budget = Math.min(args[0] ? Number(args[0]) : 10, 30);
     const result = await gateway.signals.refresh(await gateway.listPlans(true), budget);
     return ['📡 <b>분석 데이터 갱신</b>',
-      `이번에 ${result.refreshed}종목 갱신 · 실패 ${result.failed}`,
+      `이번에 ${result.refreshed}종목 갱신 · 실패 ${result.failed}` +
+        (result.reasons?.length ? ` (${html(result.reasons.join(', '))})` : ''),
       `갱신이 더 필요한 종목 ${result.remaining} / 전체 ${result.symbols}`,
       result.remaining ? '남은 종목이 있으니 <code>/분석갱신</code>을 다시 보내 주세요.' :
         '모든 종목이 최신입니다. <code>/추천</code>에서 결과를 확인하세요.',

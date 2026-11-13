@@ -7,6 +7,9 @@ import { recurringSuitability, valuationComponent } from './scoring.mjs';
 const HOST = 'https://query1.finance.yahoo.com';
 const SYMBOL = /^[A-Z0-9.^=-]{1,48}$/;
 const PROVIDER = 'yahoo-signal';
+// The host answers 429 to requests without a browser-style User-Agent.
+const HEADERS = { 'user-agent': 'Mozilla/5.0 (compatible; account-bot)',
+  accept: 'application/json' };
 const DAY = 86400000;
 const FRESH_DAYS = 7;
 const USABLE_DAYS = 21;
@@ -119,9 +122,12 @@ export function createSignals({ db, fetcher = fetch, now = () => new Date().toIS
   const options = (symbol, allowStale) => ({ provider: PROVIDER, namespace: 'signal',
     cacheKey: cacheKey(symbol), now: now(), allowStale });
   async function json(url) {
-    const response = await fetcher(url, { method: 'GET', redirect: 'manual' });
+    const response = await fetcher(url, { method: 'GET', redirect: 'manual',
+      headers: HEADERS });
     if (!response?.ok || Number(response.headers?.get('content-length')) > 1048576) {
-      throw new TypeError('public signal source unavailable');
+      const error = new TypeError('public signal source unavailable');
+      error.reason = Number.isInteger(response?.status) ? `HTTP ${response.status}` : '응답 없음';
+      throw error;
     }
     return response.json();
   }
@@ -179,6 +185,7 @@ export function createSignals({ db, fetcher = fetch, now = () => new Date().toIS
       }
       let refreshed = 0;
       let failed = 0;
+      const reasons = new Set();
       // Each group is stored before the next starts, so an interrupted run keeps
       // its progress and a retry continues with the remaining symbols.
       for (let offset = 0; offset < chosen.length; offset += 4) {
@@ -191,12 +198,16 @@ export function createSignals({ db, fetcher = fetch, now = () => new Date().toIS
               value, fetchedAt: new Date(at).toISOString(),
               expiresAt: new Date(at + FRESH_DAYS * DAY).toISOString(),
               staleUntil: new Date(at + USABLE_DAYS * DAY).toISOString() });
-          } catch { failed += 1; }
+          } catch (error) {
+            failed += 1;
+            reasons.add(typeof error?.reason === 'string' ? error.reason : '데이터 부족');
+          }
         }));
         await putMarketCaches(db, writes);
         refreshed += writes.length;
       }
-      return { symbols: list.length, refreshed, failed, remaining: due.length - refreshed };
+      return { symbols: list.length, refreshed, failed, remaining: due.length - refreshed,
+        reasons: [...reasons].sort() };
     },
   };
 }

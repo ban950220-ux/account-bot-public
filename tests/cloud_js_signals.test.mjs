@@ -25,10 +25,14 @@ const timeseries = { timeseries: { result: [
 const rising = Array.from({ length: 261 }, (_, index) => 100 * 1.002 ** index);
 
 function fakeYahoo(calls, { failing = new Set() } = {}) {
-  return async url => {
+  return async (url, init) => {
     calls.push(url);
+    // The live host rejects requests without a browser-style User-Agent.
+    if (!/^Mozilla\//.test(init?.headers?.['user-agent'] || '')) {
+      return { ok: false, status: 429, headers: new Map() };
+    }
     const symbol = decodeURIComponent(/\/(?:chart|timeseries)\/([^?]+)/.exec(url)[1]);
-    if (failing.has(symbol)) return { ok: false, headers: new Map() };
+    if (failing.has(symbol)) return { ok: false, status: 404, headers: new Map() };
     const body = url.includes('/v8/finance/chart/') ? { chart: { result: [{
       meta: { instrumentType: symbol === 'FUND' ? 'ETF' : 'EQUITY' },
       indicators: { adjclose: [{ adjclose: rising }] } }] } } : timeseries;
@@ -63,11 +67,12 @@ test('refresh spends a bounded request budget and resumes on the next call', asy
   const plans = [stored('AAA'), stored('BBB'), stored('FUND', 'ETF'), stored('BAD')];
   // Budget 3: one company (2 requests) and the fund (1); the rest wait.
   const first = await signals.refresh(plans, 3);
-  assert.deepEqual(first, { symbols: 4, refreshed: 2, failed: 0, remaining: 2 });
+  assert.deepEqual(first, { symbols: 4, refreshed: 2, failed: 0, remaining: 2, reasons: [] });
   assert.equal(calls.length, 3);
   const second = await signals.refresh(plans, 16);
   assert.equal(second.refreshed, 1);
   assert.equal(second.failed, 1);
+  assert.deepEqual(second.reasons, ['HTTP 404']);
   assert.equal(second.remaining, 1);
   const read = await signals.read(plans);
   assert.equal(read.size, 3);
