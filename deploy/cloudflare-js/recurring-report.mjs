@@ -3,25 +3,29 @@ import { add, compare, decimal, display, divide28, exact, multiply } from './fin
 import { html, money } from './assets-report.mjs';
 
 const zero = () => decimal('0');
+// Tickers added on 2026-11-13 follow Yahoo Finance sector/industry (equities)
+// or the fund's published name and type (ETFs); see docs/exposure-classification.md.
 const exposureGroups = [
   ['미국 대형 기술·성장 ETF', 'QQQ QLD MAGS VGT'],
-  ['미국 광범위 지수', 'VOO SSO SPMO IWM VTWO VUG'],
-  ['반도체', 'USD SOXQ SOXX ASX TSM KLAC LRCX ASML MPWR STM MRVL NVDA AMD AVGO MU ALGM TXN ARM QCOM'],
-  ['금융', 'XLF CME'], ['경기소비재', 'AMZN TSLA'],
+  ['미국 광범위 지수', 'VOO SSO SPMO IWM VTWO VUG GRNY'],
+  ['반도체', 'USD SOXQ SOXX ASX TSM KLAC LRCX ASML MPWR STM MRVL NVDA AMD AVGO MU ALGM TXN ARM QCOM AMAT'],
+  ['금융', 'XLF CME COIN'], ['경기소비재', 'AMZN TSLA'],
   ['산업재', 'PAVE CAT RRX CGNX JCI TKR XYL TT ETN ROK'],
   ['산업재·기술', 'NOVT'], ['데이터저장·기술', 'STX WDC SNDK'],
-  ['광통신·기술', 'COHR LITE GLW'], ['커뮤니케이션', 'GOOG'],
+  ['광통신·기술', 'COHR LITE GLW'], ['커뮤니케이션', 'GOOG LUMN'],
   ['양자컴퓨팅·기술', 'QNT'], ['청정에너지', 'BE FLNC'], ['소재', 'ECL'],
-  ['헬스케어', 'XLV LLY UNH'], ['소프트웨어', 'PLTR'], ['전력인프라', 'GEV VRT'],
-  ['옵션인컴·배당 ETF', 'QDVO QDTE QYLD QQQI GPIQ JEPQ SCHD DIVO VYM DGRO'],
-  ['금', 'GLDM'],
+  ['헬스케어', 'XLV LLY UNH'], ['소프트웨어', 'PLTR CRWD PANW'], ['전력인프라', 'GEV VRT'],
+  ['옵션인컴·배당 ETF', 'QDVO QDTE QYLD QQQI GPIQ JEPQ SCHD DIVO VYM DGRO JEPI VIG FEPI'],
+  ['금', 'GLDM'], ['에너지', 'PBR.A'], ['미국 국채', 'IEF TLT'],
 ];
 const exposures = new Map(exposureGroups.flatMap(([label, tickers]) =>
   tickers.split(' ').map(ticker => [ticker, label])));
 const usMarkets = new Set(['US', 'NASDAQ', 'NYSE', 'AMEX']);
 const etfTickers = new Set(('QQQ QLD MAGS VGT VOO SSO SPMO IWM VTWO VUG ' +
-  'USD SOXQ SOXX XLF PAVE XLV QDVO QDTE QYLD QQQI GPIQ JEPQ SCHD DIVO VYM DGRO GLDM')
+  'USD SOXQ SOXX XLF PAVE XLV QDVO QDTE QYLD QQQI GPIQ JEPQ SCHD DIVO VYM DGRO GLDM JEPI VIG IEF TLT')
   .split(' '));
+// Funds that may be registered by hand as EQUITY; either stored type is accepted.
+const eitherType = new Set(['FEPI', 'GRNY']);
 const sourceLabels = new Map([['kiwoom_accum', '키움 모으기'],
   ['meritz', '메리츠 모으기'], ['candidate', '추가 후보 7종목'], ['other', '기타']]);
 const planSourceLabels = new Map([['kiwoom_accum', '키움 모으기'],
@@ -39,7 +43,7 @@ export const exposure = (plan, analysis) => {
   const mapped = exposures.get(ticker);
   const expectedType = etfTickers.has(ticker) ? 'ETF' : 'EQUITY';
   if (mapped && usMarkets.has(plan.instrument.market) &&
-      plan.instrument.assetType === expectedType) return mapped;
+      (plan.instrument.assetType === expectedType || eitherType.has(ticker))) return mapped;
   return (plan.instrument.assetType === 'ETF' ? null : analysis?.fundamentals?.sector) ||
     '분류 확인 불가';
 };

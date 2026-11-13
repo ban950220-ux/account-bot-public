@@ -202,3 +202,20 @@ test('atomic delivery stages the policy reply with its revision', async () => {
   assert.equal(db.rows('cloud_update_claims').length, 1);
   assert.match(JSON.parse(db.rows('cloud_outbox')[0].payload_json).text, /종목 상한 40%/);
 });
+
+test('market-data classifications map to their groups, including hand-registered funds', async () => {
+  const { exposure, exposureLabels, UNCLASSIFIED } =
+    await import('../deploy/cloudflare-js/recurring-report.mjs');
+  const group = (ticker, assetType, market = 'US') => exposure({ instrument: { market, ticker,
+    assetType, currency: 'USD' } }, null);
+  assert.equal(group('CRWD', 'EQUITY'), '소프트웨어');
+  assert.equal(group('AMAT', 'EQUITY', 'NASDAQ'), '반도체');
+  assert.equal(group('PBR.A', 'EQUITY'), '에너지');
+  assert.equal(group('TLT', 'ETF'), '미국 국채');
+  assert.equal(group('JEPI', 'ETF'), '옵션인컴·배당 ETF');
+  assert.equal(group('FEPI', 'EQUITY'), '옵션인컴·배당 ETF');
+  assert.equal(group('GRNY', 'ETF'), '미국 광범위 지수');
+  assert.equal(group('TLT', 'EQUITY'), UNCLASSIFIED);
+  assert.equal(group('ZZZZ', 'EQUITY'), UNCLASSIFIED);
+  assert.ok(exposureLabels.includes('에너지') && exposureLabels.includes('미국 국채'));
+});

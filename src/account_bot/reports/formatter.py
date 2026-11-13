@@ -94,13 +94,29 @@ _RECURRING_EXPOSURE: dict[str, str] = {
     "VYM": "옵션인컴·배당 ETF",
     "DGRO": "옵션인컴·배당 ETF",
     "GLDM": "금",
+    # Added 2026-11-13 from Yahoo Finance sector/industry or fund name and type.
+    "GRNY": "미국 광범위 지수",
+    "AMAT": "반도체",
+    "COIN": "금융",
+    "LUMN": "커뮤니케이션",
+    "CRWD": "소프트웨어",
+    "PANW": "소프트웨어",
+    "JEPI": "옵션인컴·배당 ETF",
+    "VIG": "옵션인컴·배당 ETF",
+    "FEPI": "옵션인컴·배당 ETF",
+    "PBR.A": "에너지",
+    "IEF": "미국 국채",
+    "TLT": "미국 국채",
 }
 _US_RECURRING_MARKETS = frozenset({"US", "NASDAQ", "NYSE", "AMEX"})
 _RECURRING_ETFS = frozenset({
     "QQQ", "QLD", "MAGS", "VGT", "VOO", "SSO", "SPMO", "IWM", "VTWO", "VUG",
     "USD", "SOXQ", "SOXX", "XLF", "PAVE", "XLV", "QDVO", "QDTE", "QYLD",
     "QQQI", "GPIQ", "JEPQ", "SCHD", "DIVO", "VYM", "DGRO", "GLDM",
+    "JEPI", "VIG", "IEF", "TLT",
 })
+# Funds that may be registered by hand as EQUITY; either stored type is accepted.
+_RECURRING_EITHER_TYPE = frozenset({"FEPI", "GRNY"})
 
 
 def _recurring_schedule_text(plan: RecurringBuyPlan) -> str:
@@ -125,7 +141,8 @@ def _recurring_exposure(plan: RecurringBuyPlan, analysis: AnalysisResult | None)
     mapped = _RECURRING_EXPOSURE.get(ticker)
     expected_type = AssetType.ETF if ticker in _RECURRING_ETFS else AssetType.EQUITY
     if (mapped and plan.instrument.market in _US_RECURRING_MARKETS and
-            plan.instrument.asset_type == expected_type):
+            (plan.instrument.asset_type == expected_type or
+             ticker in _RECURRING_EITHER_TYPE)):
         return mapped
     # A company sector is not an ETF constituent look-through.
     if (plan.instrument.asset_type != AssetType.ETF and analysis and

@@ -255,7 +255,10 @@ class RecurringThirteenFixtureTests(unittest.TestCase):
         report = format_recurring(plans, snapshot)
         self.assertIn("월평균 환산 520,000원", report)
         self.assertIn("산업재 47.9% ⚠️", report)
-        self.assertIn("분류 확인 불가 20.8%", report)
+        # CRWD, PANW and PBR.A are classified from provider sector data.
+        self.assertIn("소프트웨어 16.7%", report)
+        self.assertIn("에너지 4.2%", report)
+        self.assertNotIn("분류 확인 불가", report)
         for day in "월화수목금":
             self.assertIn(f"{day} 24,000원", report)
         js_plans = [{"instrument": {"market": "US", "ticker": ticker,
