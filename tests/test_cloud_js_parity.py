@@ -673,7 +673,7 @@ def test_js_recurring_weekday_and_currency_budget_matches_python() -> None:
     assert rendered == format_recurring(plans, snapshot)
     assert "주간 예정 투입 7,000원" in rendered
     assert "주간 예정 투입 $10.00" in rendered
-    assert "노출군 분류 확인 불가" in rendered
+    assert "</b> · 분류 확인 불가" in rendered
 
     no_day = {**js_plans[0], "scheduledWeekdays": []}
     fixture["recurringCases"] = [{"plans": [no_day], "analyses": {}}]
@@ -725,6 +725,6 @@ def test_js_recurring_warning_and_identifier_scope_match_python() -> None:
     duplicate_days = compare([plan("US", "QQQ", "10", [0, 0])])
     assert "주간 예정 투입 $10.00" in duplicate_days
     other_listing = compare([plan("KOSPI", "QQQ", "10", [0])])
-    assert "노출군 분류 확인 불가" in other_listing
+    assert "<b>KOSPI:QQQ</b> · 분류 확인 불가" in other_listing
     other_type = compare([plan("US", "QQQ", "10", [0], "EQUITY")])
-    assert "노출군 분류 확인 불가" in other_type
+    assert "<b>US:QQQ</b> · 분류 확인 불가" in other_type

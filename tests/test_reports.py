@@ -101,25 +101,27 @@ class ReportFormatterTests(unittest.TestCase):
 
         rendered = format_recurring(plans, snapshot)
 
-        self.assertIn("모으기 내 비중 75.00%", rendered)
+        self.assertIn("평일 매일 30,000원 · 비중 75.00%", rendered)
         self.assertIn("📂 <b>ETF</b>", rendered)
-        self.assertIn("균등 기준 50.00%", rendered)
+        self.assertIn("활성 2종목 · 균등 기준 50.00%", rendered)
         self.assertIn("최종 요약", rendered)
         self.assertGreater(rendered.index("최종 요약"), rendered.index("US:VGT"))
         self.assertIn("주간 환산", rendered)
         self.assertNotIn("현재 비중", rendered)
         self.assertNotIn("목표 비중 75", rendered)
         self.assertNotIn("수익률 확인 불가", rendered)
-        self.assertIn("오늘 계획대로 실행됐다고 가정", rendered)
-        self.assertIn("1회 금액 비교", rendered)
-        self.assertIn("현재 예산 유지 시뮬레이션", rendered)
-        self.assertIn("보유자산 평가액 비중은 별도 검증", rendered)
-        self.assertIn("ETF는 단일 수동 노출군", rendered)
-        self.assertIn("모으기 금액 조정 종목 요약", rendered)
-        self.assertIn("현재 계산상 금액을 변경할 종목이 없습니다", rendered)
+        # The compact report shows a plan's source, key and unchanged-amount
+        # placeholders nowhere; comparison lines appear only for a real change.
+        self.assertIn("<b>US:DGRO</b> · 옵션인컴·배당 ETF", rendered)
+        self.assertIn("비중은 신규 모으기 투입액 기준", rendered)
+        self.assertIn("ETF는 한 노출군으로만 분류", rendered)
+        self.assertIn("종목 분석 데이터가 없어 점수와 금액 추천은 표시하지 않습니다", rendered)
+        for hidden in ("출처", "계획키", "1회 금액 비교", "사용자 목표 미설정",
+                       "시뮬레이션", "조정 종목 요약"):
+            self.assertNotIn(hidden, rendered)
         self.assertNotIn("주간 금액 비중 75.0%로 쏠림", rendered)
         self.assertNotIn("+5% 상한", rendered)
-        self.assertGreater(rendered.index("모으기 금액 조정 종목 요약"), rendered.index("최종 요약"))
+        self.assertLess(rendered.index("US:DGRO"), rendered.index("US:VGT"))
 
     def test_recurring_budget_keeps_weekday_and_currency_denominators_separate(self) -> None:
         plans = (
@@ -140,7 +142,7 @@ class ReportFormatterTests(unittest.TestCase):
         self.assertIn("주간 예정 투입 $10.00", rendered)
         self.assertIn("월평균 환산 30,333원", rendered)
         self.assertIn("월평균 환산 $43.33", rendered)
-        self.assertIn("서로 다른 통화는 환율 근거 없이 합산하지 않습니다", rendered)
+        self.assertIn("통화별로 따로 계산합니다", rendered)
         self.assertIn("분류 확인 불가", rendered)
 
     def test_recurring_report_hides_holdings_and_fill_history(self) -> None:

@@ -439,39 +439,35 @@ def format_recurring(
     daily_by_currency: dict[Currency, dict[int, Decimal]] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
-    for plan in plans_tuple:
-        if plan.enabled:
-            totals_by_currency[plan.daily_amount.currency] += _weekly_plan_amount(plan)
-            counts_by_currency[plan.daily_amount.currency] += 1
-            for weekday in plan.scheduled_weekdays:
-                daily_by_currency[plan.daily_amount.currency][weekday] += plan.daily_amount.amount
-
     exposure_amounts: dict[Currency, dict[str, Decimal]] = defaultdict(
-        lambda: defaultdict(lambda: Decimal("0"))
-    )
-    source_amounts: dict[Currency, dict[str, Decimal]] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
     for plan in plans_tuple:
         if not plan.enabled:
             continue
+        currency = plan.daily_amount.currency
+        totals_by_currency[currency] += _weekly_plan_amount(plan)
+        counts_by_currency[currency] += 1
+        for weekday in plan.scheduled_weekdays:
+            daily_by_currency[currency][weekday] += plan.daily_amount.amount
         analysis = (analyses or {}).get(plan.instrument.stable_id)
-        exposure_amounts[plan.daily_amount.currency][_recurring_exposure(plan, analysis)] += (
+        exposure_amounts[currency][_recurring_exposure(plan, analysis)] += (
             _weekly_plan_amount(plan)
-        )
-        source_amounts[plan.daily_amount.currency][plan.broker or "other"] += _weekly_plan_amount(
-            plan
         )
     display_order = {AssetType.ETF: 0, AssetType.EQUITY: 1}
     display_plans = sorted(
         plans_tuple,
         key=lambda item: (
             display_order.get(item.instrument.asset_type, 2),
-            item.broker or "",
             item.instrument.ticker,
+            item.instrument.market,
+            item.broker or "",
         ),
     )
+    recommendations, _ = recommend_recurring_amounts(plans_tuple, {})
+    recommendation_by_plan = {id(item.plan): item for item in recommendations}
     current_type: AssetType | None = None
+    analysed = 0
     for plan in display_plans:
         if plan.instrument.asset_type != current_type:
             current_type = plan.instrument.asset_type
@@ -480,95 +476,25 @@ def format_recurring(
                 AssetType.EQUITY: "개별주",
             }.get(current_type, "기타")
             lines += ["", f"📂 <b>{label}</b>"]
-    recommendations, budget_summaries = recommend_recurring_amounts(plans_tuple, {})
-    recommendation_by_plan = {id(item.plan): item for item in recommendations}
-    summary_lines: list[str] = []
-    if exposure_amounts:
-        summary_lines += ["", "📌 <b>최종 요약 · 주간 환산</b>"]
-        source_labels = {
-            "kiwoom_accum": "키움 모으기",
-            "meritz": "메리츠 모으기",
-            "candidate": "추가 후보 7종목",
-            "other": "기타",
-        }
-        for currency in sorted(exposure_amounts, key=lambda item: item.value):
-            total = totals_by_currency[currency]
-            summary_lines += ["", f"<b>주간 예정 투입 {format_money(total, currency)}</b>"]
-            daily_text = " · ".join(
-                f"{('월', '화', '수', '목', '금', '토', '일')[day]} "
-                f"{format_money(amount, currency)}"
-                for day, amount in sorted(daily_by_currency[currency].items())
-            )
-            summary_lines.append(f"요일별 1회 합계 {daily_text or '예정 요일 없음'}")
-            monthly = total * Decimal("52") / Decimal("12")
-            summary_lines.append(f"월평균 환산 {format_money(monthly, currency)}")
-            for source, amount in sorted(
-                source_amounts[currency].items(), key=lambda item: item[1], reverse=True
-            ):
-                summary_lines.append(
-                    f"• {escape(source_labels.get(source, source))} "
-                    f"{format_money(amount, currency)}"
-                )
-            summary_lines.append("노출군별 예정 투입 비중 (같은 통화의 주간 합계 기준)")
-            ranked = sorted(
-                exposure_amounts[currency].items(), key=lambda item: item[1], reverse=True
-            )
-            for exposure, amount in ranked:
-                pct = amount / total * Decimal("100") if total else None
-                warning = " ⚠️" if pct is not None and pct >= Decimal("25") else ""
-                label = f"{_q(pct, '0.1'):.1f}%" if pct is not None else "확인 불가"
-                summary_lines.append(f"• {escape(exposure)} {label}{warning}")
-            summary_lines.append("⚠️는 기존 참고 경고선 25% 이상이며 목표 비중이 아닙니다.")
-        if budget_summaries:
-            summary_lines += ["", "💡 <b>현재 예산 유지 시뮬레이션</b>"]
-            for budget in budget_summaries:
-                change_pct = (
-                    (budget.recommended_weekly_amount / budget.current_weekly_amount - 1)
-                    * Decimal("100")
-                    if budget.current_weekly_amount > 0
-                    else Decimal("0")
-                )
-                summary_lines.append(
-                    f"• {budget.currency.value} 주간 "
-                    f"{format_money(budget.current_weekly_amount, budget.currency)} → "
-                    f"{format_money(budget.recommended_weekly_amount, budget.currency)} "
-                    f"({change_pct:+.1f}%)"
-                )
-                summary_lines.append(f"  상태: {escape(budget.status)}")
-
-    for plan in plans_tuple:
         analysis = (analyses or {}).get(plan.instrument.stable_id)
-        lines += ["", f"<b>{escape(plan.instrument.display_id)}</b>"]
-        if plan.broker:
-            source_label = {
-                "kiwoom_accum": "키움 모으기",
-                "meritz": "메리츠 모으기",
-                "candidate": "사용자 추가 후보 · 키움 설정 미확인",
-            }.get(plan.broker, plan.broker)
-            lines.append(f"출처 {escape(source_label)}")
+        lines += [
+            "",
+            f"<b>{escape(plan.instrument.display_id)}</b> · "
+            f"{escape(_recurring_exposure(plan, analysis))}",
+        ]
+        total = totals_by_currency[plan.daily_amount.currency]
+        if not plan.enabled:
+            weight = "중단"
+        elif total > 0:
+            weight = f"비중 {_weekly_plan_amount(plan) / total * Decimal('100'):.2f}%"
+        else:
+            weight = "비중 확인 불가"
         lines.append(
             f"{_recurring_schedule_text(plan)} "
-            f"{format_money(plan.daily_amount.amount, plan.daily_amount.currency)}"
+            f"{format_money(plan.daily_amount.amount, plan.daily_amount.currency)} · {weight}"
         )
-        daily_total = totals_by_currency[plan.daily_amount.currency]
-        basket_weight = (
-            _weekly_plan_amount(plan) / daily_total * Decimal("100")
-            if plan.enabled and daily_total > 0
-            else None
-        )
-        equal_weight = (
-            Decimal("100") / Decimal(counts_by_currency[plan.daily_amount.currency])
-            if counts_by_currency[plan.daily_amount.currency] > 0
-            else None
-        )
-        lines.append(
-            "모으기 내 비중 "
-            + (f"{basket_weight:.2f}%" if basket_weight is not None else "확인 불가")
-            + (f" · 균등 기준 {equal_weight:.2f}%" if equal_weight is not None else "")
-            + " · 주간 환산"
-        )
-        lines.append(f"노출군 {_recurring_exposure(plan, analysis)}")
         if analysis is not None:
+            analysed += 1
             valuation_score = next(
                 (
                     component.score
@@ -583,62 +509,70 @@ def format_recurring(
             lines.append(f"장기추세 적합성 {_score_text(suitability.score)} / 100")
             if suitability.reasons:
                 lines.append("추세 근거: " + escape(" · ".join(suitability.reasons)))
-            lines.append("모으기 예산 판단: 사용자 목표 미설정 · 현재 금액 유지")
-        else:
-            lines.append("종목 적합성: 분석 데이터 부족")
-            lines.append("모으기 예산 판단: 사용자 목표 미설정 · 현재 금액 유지")
         recommendation = recommendation_by_plan[id(plan)]
-        lines.append(
-            "1회 금액 비교: "
-            f"{format_money(plan.daily_amount.amount, plan.daily_amount.currency)} → "
-            f"{format_money(recommendation.recommended_amount, plan.daily_amount.currency)} "
-            f"({recommendation.action})"
-        )
-        if recommendation.reasons:
+        if recommendation.action in ("감액", "증액"):
+            lines.append(
+                "1회 금액 비교: "
+                f"{format_money(plan.daily_amount.amount, plan.daily_amount.currency)} → "
+                f"{format_money(recommendation.recommended_amount, plan.daily_amount.currency)} "
+                f"({recommendation.action})"
+            )
             lines.append("조정 근거: " + escape(" · ".join(recommendation.reasons)))
         if plan.investment_thesis:
             lines.append(f"Thesis: {escape(plan.investment_thesis[:180])}")
-    lines += summary_lines
+    if exposure_amounts:
+        lines += ["", "📌 <b>최종 요약 · 주간 환산</b>"]
+        for currency in sorted(exposure_amounts, key=lambda item: item.value):
+            total = totals_by_currency[currency]
+            lines += ["", f"<b>주간 예정 투입 {format_money(total, currency)}</b>"]
+            daily_text = " · ".join(
+                f"{('월', '화', '수', '목', '금', '토', '일')[day]} "
+                f"{format_money(amount, currency)}"
+                for day, amount in sorted(daily_by_currency[currency].items())
+            )
+            lines.append(f"요일별 1회 합계 {daily_text or '예정 요일 없음'}")
+            monthly = total * Decimal("52") / Decimal("12")
+            lines.append(f"월평균 환산 {format_money(monthly, currency)}")
+            count = counts_by_currency[currency]
+            lines.append(
+                f"활성 {count}종목 · 균등 기준 {Decimal('100') / Decimal(count):.2f}%"
+            )
+            lines.append("노출군별 예정 투입 비중 (같은 통화의 주간 합계 기준)")
+            ranked = sorted(
+                exposure_amounts[currency].items(), key=lambda item: item[1], reverse=True
+            )
+            for exposure, amount in ranked:
+                pct = amount / total * Decimal("100") if total else None
+                warning = " ⚠️" if pct is not None and pct >= Decimal("25") else ""
+                label = f"{_q(pct, '0.1'):.1f}%" if pct is not None else "확인 불가"
+                lines.append(f"• {escape(exposure)} {label}{warning}")
+            lines.append("⚠️는 기존 참고 경고선 25% 이상이며 목표 비중이 아닙니다.")
     lines += [
         "",
-        "메리츠는 오늘 계획대로 실행됐다고 가정한 시뮬레이션이며 실제 체결 확인이 아닙니다.",
         "요일별·주간은 설정된 요일마다 1회 실행을 가정하며 휴장일은 차감하지 않습니다.",
         "월평균은 주간 × 52 ÷ 12이며 실제 월별 거래일 합계가 아닙니다.",
-        "서로 다른 통화는 환율 근거 없이 합산하지 않습니다.",
-        "이 비중은 신규 모으기 투입액 기준입니다. 보유자산 평가액 비중은 별도 검증 전까지 표시하지 않습니다.",
-        "ETF는 단일 수동 노출군으로만 분류하며 내부 구성·직접 보유 중복은 계산하지 않습니다.",
-        "사용자 예산·섹터 목표가 없어 자동 금액 변경안이나 투자 권고를 만들지 않습니다.",
+        "비중은 신규 모으기 투입액 기준이며 통화별로 따로 계산합니다. "
+        "ETF는 한 노출군으로만 분류합니다.",
     ]
-    reduced = tuple(item for item in recommendations if item.action == "감액")
-    increased = tuple(item for item in recommendations if item.action == "증액")
-    lines += ["", "🧾 <b>모으기 금액 조정 종목 요약</b>"]
-    if not reduced and not increased:
-        lines.append("현재 계산상 금액을 변경할 종목이 없습니다.")
-    if reduced:
-        lines += ["", "🔻 <b>줄여야 할 종목</b>"]
-        for item in reduced:
-            currency = item.plan.daily_amount.currency
-            reduction_reasons = tuple(
-                reason
-                for reason in item.reasons
-                if "유지" not in reason and "보류" not in reason
-            ) or item.reasons
-            lines.append(
-                f"• <b>{escape(item.plan.instrument.display_id)}</b> "
-                f"{format_money(item.plan.daily_amount.amount, currency)} → "
-                f"{format_money(item.recommended_amount, currency)}"
-            )
-            lines.append("  이유: " + escape(" · ".join(reduction_reasons)))
-    if increased:
-        lines += ["", "🔺 <b>늘릴 수 있는 종목</b>"]
-        for item in increased:
+    if not analysed:
+        lines.append("종목 분석 데이터가 없어 점수와 금액 추천은 표시하지 않습니다.")
+    by_plan = [recommendation_by_plan[id(plan)] for plan in display_plans]
+    for action, title, label in (
+        ("감액", "🔻 <b>줄여야 할 종목</b>", "이유"),
+        ("증액", "🔺 <b>늘릴 수 있는 종목</b>", "근거"),
+    ):
+        items = [item for item in by_plan if item.action == action]
+        if not items:
+            continue
+        lines += ["", title]
+        for item in items:
             currency = item.plan.daily_amount.currency
             lines.append(
                 f"• <b>{escape(item.plan.instrument.display_id)}</b> "
                 f"{format_money(item.plan.daily_amount.amount, currency)} → "
                 f"{format_money(item.recommended_amount, currency)}"
             )
-            lines.append("  근거: " + escape(" · ".join(item.reasons)))
+            lines.append(f"  {label}: " + escape(" · ".join(item.reasons)))
     return "\n".join(lines)
 
 

@@ -219,3 +219,22 @@ test('market-data classifications map to their groups, including hand-registered
   assert.equal(group('ZZZZ', 'EQUITY'), UNCLASSIFIED);
   assert.ok(exposureLabels.includes('에너지') && exposureLabels.includes('미국 국채'));
 });
+
+test('plan amount and state can be changed by ticker without a plan key', async () => {
+  const { db, route } = await operating();
+  const row = () => db.rows('cloud_plans').find(plan => plan.ticker === 'NVDA');
+  assert.match((await route(600, '/모으기설정 nvda 3,000')).reply, /US:NVDA<\/b> 3,000원 · ON/);
+  assert.equal(row().daily_amount, '3000');
+  assert.equal(row().version, 2);
+  assert.match((await route(601, '/모으기설정 NVDA OFF')).reply, /3,000원 · OFF/);
+  assert.equal(row().enabled, 0);
+  assert.match((await route(602, '/recurring_set US:NVDA 2000 ON')).reply, /2,000원 · ON/);
+  assert.equal(row().version, 4);
+  assert.match((await route(603, '/모으기설정 ZZZZ 2000')).reply, /계획을 찾지 못했습니다/);
+  assert.match((await route(604, '/모으기설정 NVDA 2000 3000')).reply, /사용법/);
+  assert.equal(db.rows('cloud_plan_revisions').length, 6);
+  const report = (await route(605, '/모으기')).reply;
+  for (const hidden of ['출처', '계획키', '사용자 목표 미설정']) assert.ok(!report.includes(hidden));
+  assert.ok(report.indexOf('US:VOO') < report.indexOf('US:AVGO'));
+  assert.match(report, /<b>US:NVDA<\/b> · 반도체\n평일 매일 2,000원 · 비중 25\.00%/);
+});

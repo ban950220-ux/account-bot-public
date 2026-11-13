@@ -26,10 +26,6 @@ const etfTickers = new Set(('QQQ QLD MAGS VGT VOO SSO SPMO IWM VTWO VUG ' +
   .split(' '));
 // Funds that may be registered by hand as EQUITY; either stored type is accepted.
 const eitherType = new Set(['FEPI', 'GRNY']);
-const sourceLabels = new Map([['kiwoom_accum', '키움 모으기'],
-  ['meritz', '메리츠 모으기'], ['candidate', '추가 후보 7종목'], ['other', '기타']]);
-const planSourceLabels = new Map([['kiwoom_accum', '키움 모으기'],
-  ['meritz', '메리츠 모으기'], ['candidate', '사용자 추가 후보 · 키움 설정 미확인']]);
 const weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
 
 const stableId = plan => `${plan.instrument.market}:${plan.instrument.ticker}`;
@@ -78,7 +74,6 @@ export function formatRecurring(plans, analyses = {}) {
   const totals = new Map();
   const counts = new Map();
   const byExposure = new Map();
-  const bySource = new Map();
   const byWeekday = new Map();
   for (const plan of plans) {
     if (!plan.enabled) continue;
@@ -92,42 +87,36 @@ export function formatRecurring(plans, analyses = {}) {
       byWeekday.get(currency).set(day, add(previous, decimal(plan.dailyAmount)));
     }
     if (!byExposure.has(currency)) byExposure.set(currency, new Map());
-    if (!bySource.has(currency)) bySource.set(currency, new Map());
     const group = exposure(plan, analyses[fullId(plan)]);
     byExposure.get(currency).set(group, add(byExposure.get(currency).get(group) || zero(), amount));
-    const source = plan.broker || 'other';
-    bySource.get(currency).set(source, add(bySource.get(currency).get(source) || zero(), amount));
   }
   const lines = ['🌱 <b>매일모으기</b>'];
-  const sorted = [...plans].sort((left, right) =>
-    ({ ETF: 0, EQUITY: 1 }[left.instrument.assetType] ?? 2) -
-    ({ ETF: 0, EQUITY: 1 }[right.instrument.assetType] ?? 2) ||
-    (left.broker || '').localeCompare(right.broker || '') ||
-    left.instrument.ticker.localeCompare(right.instrument.ticker));
+  const order = plan => ({ ETF: 0, EQUITY: 1 }[plan.instrument.assetType] ?? 2);
+  const text = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+  const sorted = [...plans].sort((left, right) => order(left) - order(right) ||
+    text(left.instrument.ticker, right.instrument.ticker) ||
+    text(left.instrument.market, right.instrument.market) ||
+    text(left.broker || '', right.broker || ''));
+  const recommendations = new Map(plans.map(plan => [plan, recommended(plan)]));
   let lastType = null;
-  for (const plan of sorted) if (plan.instrument.assetType !== lastType) {
-    lastType = plan.instrument.assetType;
-    lines.push('', `📂 <b>${{ ETF: 'ETF', EQUITY: '개별주' }[lastType] || '기타'}</b>`);
-  }
-  const recommendations = plans.map(plan => recommended(plan));
-  for (const [index, plan] of plans.entries()) {
-    lines.push('', `<b>${html(stableId(plan))}</b>`);
-    if (plan.planKey && Number.isSafeInteger(plan.version)) lines.push(`계획키 <code>${html(plan.planKey)}</code> · 버전 ${plan.version}`);
-    if (plan.broker) lines.push(`출처 ${html(planSourceLabels.get(plan.broker) || plan.broker)}`);
-    lines.push(`${schedule(plan)} ${money(plan.dailyAmount, plan.currency)}`);
-    const total = totals.get(plan.currency) || zero();
-    const weight = plan.enabled && compare(total, zero()) > 0 ?
-      `${percent(weekly(plan), total, 2)}%` : '확인 불가';
-    const count = counts.get(plan.currency) || 0;
-    const equal = count ? ` · 균등 기준 ${percent(decimal('1'), decimal(String(count)), 2)}%` : '';
-    lines.push(`모으기 내 비중 ${weight}${equal} · 주간 환산`);
+  let analysed = 0;
+  for (const plan of sorted) {
+    if (plan.instrument.assetType !== lastType) {
+      lastType = plan.instrument.assetType;
+      lines.push('', `📂 <b>${{ ETF: 'ETF', EQUITY: '개별주' }[lastType] || '기타'}</b>`);
+    }
     const analysis = analyses[fullId(plan)];
     if (analysis && (!analysis.companyScore?.components ||
         !analysis.recurringSuitability || !analysis.finalScore)) {
       throw new TypeError('incomplete recurring analysis');
     }
-    lines.push(`노출군 ${exposure(plan, analysis)}`);
+    lines.push('', `<b>${html(stableId(plan))}</b> · ${html(exposure(plan, analysis))}`);
+    const total = totals.get(plan.currency) || zero();
+    const weight = !plan.enabled ? '중단' : compare(total, zero()) > 0 ?
+      `비중 ${percent(weekly(plan), total, 2)}%` : '비중 확인 불가';
+    lines.push(`${schedule(plan)} ${money(plan.dailyAmount, plan.currency)} · ${weight}`);
     if (analysis) {
+      analysed += 1;
       const valuation = valuationScore(analysis);
       const score = value => value == null ? '보류' : display(decimal(value), 2).replaceAll(',', '');
       lines.push(`기업점수 ${score(analysis.companyScore.score)} / 100`,
@@ -136,13 +125,13 @@ export function formatRecurring(plans, analyses = {}) {
       if (analysis.recurringSuitability.reasons?.length) {
         lines.push('추세 근거: ' + html(analysis.recurringSuitability.reasons.join(' · ')));
       }
-      lines.push('모으기 예산 판단: 사용자 목표 미설정 · 현재 금액 유지');
-    } else lines.push('종목 적합성: 분석 데이터 부족',
-      '모으기 예산 판단: 사용자 목표 미설정 · 현재 금액 유지');
-    const rec = recommendations[index];
-    lines.push(`1회 금액 비교: ${money(plan.dailyAmount, plan.currency)} → ` +
-      `${money(exact(rec.amount), plan.currency)} (${rec.action})`);
-    lines.push('조정 근거: ' + rec.reasons.map(html).join(' · '));
+    }
+    const rec = recommendations.get(plan);
+    if (rec.action === '감액' || rec.action === '증액') {
+      lines.push(`1회 금액 비교: ${money(plan.dailyAmount, plan.currency)} → ` +
+        `${money(exact(rec.amount), plan.currency)} (${rec.action})`,
+      '조정 근거: ' + rec.reasons.map(html).join(' · '));
+    }
     if (plan.investmentThesis) lines.push(`Thesis: ${html(plan.investmentThesis.slice(0, 180))}`);
   }
   if (byExposure.size) {
@@ -156,10 +145,9 @@ export function formatRecurring(plans, analyses = {}) {
       lines.push(`요일별 1회 합계 ${daily || '예정 요일 없음'}`);
       lines.push(`월평균 환산 ${money(exact(divide28(multiply(total,
         decimal('52')), decimal('12'))), currency)}`);
-      for (const [source, amount] of [...bySource.get(currency)].sort((a, b) =>
-        -compare(a[1], b[1]))) {
-        lines.push(`• ${html(sourceLabels.get(source) || source)} ${money(exact(amount), currency)}`);
-      }
+      const count = counts.get(currency);
+      lines.push(`활성 ${count}종목 · 균등 기준 ` +
+        `${percent(decimal('1'), decimal(String(count)), 2)}%`);
       lines.push('노출군별 예정 투입 비중 (같은 통화의 주간 합계 기준)');
       for (const [group, amount] of [...byExposure.get(currency)].sort((a, b) =>
         -compare(a[1], b[1]))) {
@@ -171,47 +159,22 @@ export function formatRecurring(plans, analyses = {}) {
       }
       lines.push('⚠️는 기존 참고 경고선 25% 이상이며 목표 비중이 아닙니다.');
     }
-    lines.push('', '💡 <b>현재 예산 유지 시뮬레이션</b>');
-    for (const currency of [...totals.keys()].sort()) {
-      const prior = totals.get(currency);
-      const future = plans.reduce((sum, plan, index) =>
-        plan.enabled && plan.currency === currency ? add(sum,
-          multiply(recommendations[index].amount,
-            decimal(String(new Set(plan.scheduledWeekdays).size)))) : sum, zero());
-      const change = compare(prior, zero()) > 0 ?
-        multiply(divide28(future, prior), decimal('100')) : zero();
-      const difference = compare(prior, zero()) > 0 ?
-        exact(add(change, decimal('-100'))) : '0';
-      const signed = compare(decimal(difference), zero()) >= 0 ? '+' : '';
-      lines.push(`• ${currency} 주간 ${money(exact(prior), currency)} → ` +
-        `${money(exact(future), currency)} (${signed}${display(decimal(difference), 1)}%)`);
-      lines.push('  상태: 현재 예산 유지 · 사용자 목표 미설정');
-    }
   }
-  lines.push('', '메리츠는 오늘 계획대로 실행됐다고 가정한 시뮬레이션이며 실제 체결 확인이 아닙니다.',
-    '요일별·주간은 설정된 요일마다 1회 실행을 가정하며 휴장일은 차감하지 않습니다.',
+  lines.push('', '요일별·주간은 설정된 요일마다 1회 실행을 가정하며 휴장일은 차감하지 않습니다.',
     '월평균은 주간 × 52 ÷ 12이며 실제 월별 거래일 합계가 아닙니다.',
-    '서로 다른 통화는 환율 근거 없이 합산하지 않습니다.',
-    '이 비중은 신규 모으기 투입액 기준입니다. 보유자산 평가액 비중은 별도 검증 전까지 표시하지 않습니다.',
-    'ETF는 단일 수동 노출군으로만 분류하며 내부 구성·직접 보유 중복은 계산하지 않습니다.',
-    '사용자 예산·섹터 목표가 없어 자동 금액 변경안이나 투자 권고를 만들지 않습니다.',
-    '', '🧾 <b>모으기 금액 조정 종목 요약</b>');
-  const reduced = recommendations.map((rec, index) => [rec, plans[index]])
-    .filter(([rec]) => rec.action === '감액');
-  const increased = recommendations.map((rec, index) => [rec, plans[index]])
-    .filter(([rec]) => rec.action === '증액');
-  if (!reduced.length && !increased.length) lines.push('현재 계산상 금액을 변경할 종목이 없습니다.');
-  if (reduced.length) {
-    lines.push('', '🔻 <b>줄여야 할 종목</b>');
-    for (const [rec, plan] of reduced) lines.push(
-      `• <b>${html(stableId(plan))}</b> ${money(plan.dailyAmount, plan.currency)} → ` +
-      money(exact(rec.amount), plan.currency), '  이유: ' + rec.reasons.map(html).join(' · '));
-  }
-  if (increased.length) {
-    lines.push('', '🔺 <b>늘릴 수 있는 종목</b>');
-    for (const [rec, plan] of increased) lines.push(
-      `• <b>${html(stableId(plan))}</b> ${money(plan.dailyAmount, plan.currency)} → ` +
-      money(exact(rec.amount), plan.currency), '  근거: ' + rec.reasons.map(html).join(' · '));
+    '비중은 신규 모으기 투입액 기준이며 통화별로 따로 계산합니다. ETF는 한 노출군으로만 분류합니다.');
+  if (!analysed) lines.push('종목 분석 데이터가 없어 점수와 금액 추천은 표시하지 않습니다.');
+  const changed = action => sorted.filter(plan => recommendations.get(plan).action === action);
+  for (const [action, title, label] of [['감액', '🔻 <b>줄여야 할 종목</b>', '이유'],
+    ['증액', '🔺 <b>늘릴 수 있는 종목</b>', '근거']]) {
+    const items = changed(action);
+    if (!items.length) continue;
+    lines.push('', title);
+    for (const plan of items) {
+      const rec = recommendations.get(plan);
+      lines.push(`• <b>${html(stableId(plan))}</b> ${money(plan.dailyAmount, plan.currency)} → ` +
+        money(exact(rec.amount), plan.currency), `  ${label}: ` + rec.reasons.map(html).join(' · '));
+    }
   }
   return lines.join('\n');
 }

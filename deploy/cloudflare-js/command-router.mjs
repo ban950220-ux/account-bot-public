@@ -231,12 +231,49 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
       mutationKey: `update:${updateId}`, delivery: delivery && { ...delivery, render } });
     return render(plan);
   }
+  if (command === 'recurring_set' && [2, 3].includes(args.length)) {
+    // Ticker form: `/모으기설정 NVDA 3000`, `/모으기설정 NVDA OFF`, `/모으기설정 NVDA 3000 OFF`.
+    const usage = '사용법: <code>/모으기설정 NVDA 3000</code> · <code>/모으기설정 NVDA OFF</code>' +
+      ' · <code>/모으기설정 NVDA 3000 ON</code>\n봇 계획만 변경, 증권사 주문 없음';
+    const flags = args.slice(1).filter(value => /^(ON|OFF)$/i.test(value));
+    const amounts = args.slice(1).filter(value => /^\d[\d,]*(?:원)?$/.test(value));
+    if (flags.length > 1 || amounts.length > 1 || flags.length + amounts.length !== args.length - 1 ||
+        !/^[A-Za-z0-9.]+(?::[A-Za-z0-9.]+)?$/.test(args[0])) return usage;
+    requireGateway(gateway, 'listPlans');
+    requireGateway(gateway, 'editPlan');
+    const [first, second] = args[0].toUpperCase().split(':');
+    const ticker = second ?? first;
+    const market = second ? first : null;
+    const matches = (await gateway.listPlans(false)).filter(plan => plan.planKey &&
+      plan.instrument.ticker === ticker && (!market || plan.instrument.market === market));
+    if (!matches.length) return `${html(args[0].toUpperCase())} 계획을 찾지 못했습니다.`;
+    if (matches.length > 1) {
+      return '같은 종목의 계획이 여러 개입니다. 아래 중 하나로 지정해 주세요.\n' +
+        matches.map(plan => `<code>/recurring_set ${html(plan.planKey)} ` +
+          `${amounts[0]?.replace(/[,원]/g, '') ?? plan.dailyAmount} ${plan.currency} ` +
+          `${(flags[0] ?? (plan.enabled ? 'ON' : 'OFF')).toUpperCase()} ${plan.version}</code>`)
+          .join('\n');
+    }
+    const [target] = matches;
+    mutationAllowed(signal);
+    if (delivery) delivery.mutationAttempted = true;
+    const render = plan => `✅ <b>${html(`${plan.instrument.market}:${plan.instrument.ticker}`)}</b> ` +
+      `${money(plan.dailyAmount, plan.currency)} · ${plan.enabled ? 'ON' : 'OFF'}\n` +
+      '봇의 모으기 계획만 변경했습니다. 증권사 주문은 실행하지 않습니다.';
+    const plan = await gateway.editPlan({ planKey: target.planKey,
+      amount: amounts[0]?.replace(/[,원]/g, '') ?? target.dailyAmount, currency: target.currency,
+      enabled: flags.length ? flags[0].toUpperCase() === 'ON' : target.enabled,
+      expectedVersion: target.version, mutationKey: `update:${updateId}`,
+      delivery: delivery && { ...delivery, render } });
+    return render(plan);
+  }
   if (command === 'recurring_set') {
     if (args.length !== 5 || !/^[A-Za-z0-9._:-]{1,128}$/.test(args[0]) ||
         !/^[0-9]+(?:\.[0-9]+)?$/.test(args[1]) || !['KRW','USD'].includes(args[2]) ||
         !['ON','OFF'].includes(args[3].toUpperCase()) || !/^[1-9][0-9]*$/.test(args[4]) ||
         !Number.isSafeInteger(Number(args[4]))) {
-      return '사용법: <code>/recurring_set 계획키 금액 KRW ON 현재버전</code> · 봇 계획만 변경, 증권사 주문 없음';
+      return '사용법: <code>/모으기설정 NVDA 3000</code> · <code>/모으기설정 NVDA OFF</code>\n' +
+        '봇 계획만 변경, 증권사 주문 없음';
     }
     requireGateway(gateway, 'editPlan');
     mutationAllowed(signal);
