@@ -1,0 +1,59 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments and packaging
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+/web/node_modules/
+/web/node_modules.stale/
+/web/node_modules.*/
+/web/dist/
+*.tsbuildinfo
+/.pnpm-store/
+/.cloud-cache/
+
+# Runtime state (may contain portfolio/account metadata)
+/data/
+/logs/
+/reports/
+/cache/
+/meritz_snapshot/
+/.codex-remote-attachments/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

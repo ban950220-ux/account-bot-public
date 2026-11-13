@@ -1,0 +1,18 @@
+[Unit]
+Description=Account bot Telegram polling and scheduled reports
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=accountbot
+WorkingDirectory=/opt/account-bot
+ExecStart=/opt/account-bot/.venv/bin/python -m account_bot --env-file /etc/account-bot/account-bot.env run
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=infinity
+SendSIGKILL=no
+
+[Install]
+WantedBy=multi-user.target

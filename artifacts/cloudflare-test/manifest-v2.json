@@ -1,0 +1,16 @@
+{
+  "source_commit": "215e7a014dee2960330730413ef1809a7152c4e8",
+  "supersedes_test_bundle_sha256": "d9fd3d8ccf3a91b0f60965c4e4ae685c108883dc8ba6b4f09e8058814164162c",
+  "files": [
+    {
+      "name": "account-bot-cloud-test-v2-20261027.mjs",
+      "size_bytes": 156500,
+      "sha256": "62fd82c8e96bbac7918e4cce701b6142a74a636dad6daac4a6aea815056da8c1"
+    },
+    {
+      "name": "ACCOUNT_BOT_TEST_DEPLOY_V2.md",
+      "size_bytes": 4470,
+      "sha256": "c4893e0959c27739e8860aecf1735ac410fdb348127823a8719c70885103c0f3"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+name: Offline CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install project and development dependencies
+        run: python -m pip install -e ".[market,dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Check installed dependency consistency
+        run: python -m pip check
+
+      - name: Start disposable offline API and verify HTTP health
+        run: python scripts/cloud/validate.py smoke
+
+      - name: Build wheel
+        if: matrix.python-version == '3.11'
+        run: python -m pip wheel . --no-deps --wheel-dir dist
+
+  frontend:
+    name: Web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and build
+        run: pnpm run build
+
+  cloud-js:
+    name: Cloud Worker synthetic tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python for frozen migration fixtures
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Test D1 and Worker contracts without external calls
+        env:
+          NODE_OPTIONS: --import=./tests/cloud_deny_network.mjs
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: node --test tests/cloud_js_*.test.mjs
+
+      - name: Install existing project dependencies for Python migration checks
+        run: python -m pip install -e ".[market,dev]"
+
+      - name: Run focused migration, reverse and Python-JS parity checks
+        env:
+          NODE_OPTIONS: --import=./tests/cloud_deny_network.mjs
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -B tests/run_cloud_cutover_checks.py
+
+  windows-control:
+    name: Windows local control
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install project and test dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify local locks and graceful shutdown without credentials
+        run: >-
+          python -m pytest -q
+          tests/test_runtime_lock.py
+          tests/test_local_control.py
+          tests/test_app.py
+          tests/test_telegram_auth.py
+          tests/test_scheduler.py
