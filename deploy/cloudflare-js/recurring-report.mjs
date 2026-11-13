@@ -68,7 +68,8 @@ function recommended(plan) {
     reasons: ['사용자 목표 미설정 · 현재 금액 유지'] };
 }
 
-export function formatRecurring(plans, analyses = {}) {
+// `signals` is an optional Map of plan id to cached public scores.
+export function formatRecurring(plans, analyses = {}, signals = new Map()) {
   if (!plans.length) return '🌱 <b>매일모으기</b>\n\n등록된 종목이 없습니다.\n' +
     '<code>/recurring_add AMD 20USD 8%</code>로 로컬 계획을 등록할 수 있습니다.';
   const totals = new Map();
@@ -125,6 +126,15 @@ export function formatRecurring(plans, analyses = {}) {
       if (analysis.recurringSuitability.reasons?.length) {
         lines.push('추세 근거: ' + html(analysis.recurringSuitability.reasons.join(' · ')));
       }
+    }
+    const signal = analysis ? null : signals.get(fullId(plan));
+    if (signal && (signal.valuationScore != null || signal.trendScore != null)) {
+      analysed += 1;
+      const shown = value => display(decimal(value), 1);
+      lines.push([signal.valuationScore != null ?
+        `Valuation ${shown(signal.valuationScore)} / 100` : null,
+      signal.trendScore != null ? `장기추세 ${shown(signal.trendScore)} / 100` : null]
+        .filter(Boolean).join(' · '));
     }
     const rec = recommendations.get(plan);
     if (rec.action === '감액' || rec.action === '증액') {

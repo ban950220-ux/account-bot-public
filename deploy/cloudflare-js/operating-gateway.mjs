@@ -4,6 +4,7 @@ import { createKiwoomReadOnlyProvider } from './kiwoom-readonly.mjs';
 import { latestMeritzRevision, manualSnapshotFreshness } from './manual-input.mjs';
 import { readLegacyHistory } from './legacy-read.mjs';
 import { createYahooChartReadOnly } from './yahoo-chart-readonly.mjs';
+import { createSignals } from './signals.mjs';
 
 const FINGERPRINT = /^[a-z][a-z0-9_]{0,30}_[0-9a-f]{64}$/;
 function requiredFingerprint(value) {
@@ -79,5 +80,9 @@ export async function createOperatingGateway(env, { now = () => new Date().toISO
     meritzSnapshotFingerprint: meritzScope, now,
     timezoneName: env.REPORT_TIMEZONE || 'Asia/Seoul' });
   gateway.legacyHistory = (kind, options) => readLegacyHistory(env.DB, kind, options);
+  // Cached public trend/valuation signals. Commands may refresh them on request;
+  // scheduled runs touch them only when the owner enabled the plain flag.
+  gateway.signals = createSignals({ db: env.DB, fetcher, now });
+  gateway.signalRefreshEnabled = env.PUBLIC_SIGNAL_REFRESH_ENABLED === 'true';
   return gateway;
 }

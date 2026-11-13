@@ -27,6 +27,7 @@ const ALIASES = new Map([
   ['history', 'history'], ['이력', 'history'],
   ['policy', 'policy'], ['목표', 'policy'], ['recommend', 'recommend'], ['추천', 'recommend'],
   ['recommend_apply', 'recommend_apply'], ['추천적용', 'recommend_apply'],
+  ['signals', 'signals'], ['분석갱신', 'signals'],
 ]);
 const KR_MARKETS = new Set(['KOSPI', 'KOSDAQ', 'KRX', 'NXT']);
 const US_MARKETS = new Set(['US','USA','NASDAQ','NAS','NYSE','AMEX','ARCA','NYSEARCA']);
@@ -67,10 +68,17 @@ async function buildProposal(gateway, known = null) {
     ['listPlans', 'currentPolicy', 'editablePlanKeys']) requireGateway(gateway, method);
   const [plans, state, editable] = await Promise.all([known || gateway.listPlans(true),
     gateway.currentPolicy(), known ? new Set() : gateway.editablePlanKeys()]);
+  let signals = new Map();
+  if (typeof gateway.signals?.read === 'function') {
+    try { signals = await gateway.signals.read(plans); }
+    catch { /* Missing scores leave amounts unchanged; they never block the reply. */ }
+  }
   const inputs = plans.filter(plan => plan.enabled).map(plan => {
     const label = `${plan.instrument.market}:${plan.instrument.ticker}`;
     return { id: plan.planKey || `${plan.broker}:${label}`, planKey: plan.planKey ?? null,
       version: plan.version ?? null, ticker: plan.instrument.ticker, label,
+      broker: plan.broker ?? null,
+      signal: signals.get(`${label}:${plan.instrument.assetType}:${plan.instrument.currency}`) ?? null,
       currency: plan.currency, dailyAmount: plan.dailyAmount,
       days: new Set(plan.scheduledWeekdays).size,
       adjustable: Boolean(plan.planKey) && Number.isSafeInteger(plan.version) &&
@@ -85,7 +93,7 @@ async function buildProposal(gateway, known = null) {
       new TextEncoder().encode(fingerprint)));
     token = [...bytes.slice(0, 4)].map(byte => byte.toString(16).padStart(2, '0')).join('');
   }
-  return { state, results, token };
+  return { state, results, token, signals };
 }
 
 async function replyFor(parsed, gateway, updateId, signal, delivery) {
@@ -119,11 +127,11 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     const [refresh, plans] = await Promise.all([gateway.refresh({ force: false,
       allBrokers: false }), gateway.listPlans(true)]);
     const analyses = await planAnalyses(gateway, plans, refresh.snapshot);
-    const report = formatRecurring(plans, analyses);
-    // Optional addendum; a gateway without policy support keeps the legacy reply.
-    if (typeof gateway.currentPolicy !== 'function') return report;
+    // A gateway without policy support keeps the plain report.
+    if (typeof gateway.currentPolicy !== 'function') return formatRecurring(plans, analyses);
     const proposal = await buildProposal(gateway, plans);
-    return report + policyNotice(proposal.results, proposal.state.policy);
+    return formatRecurring(plans, analyses, proposal.signals) +
+      policyNotice(proposal.results, proposal.state.policy);
   }
   if (command === 'policy') {
     requireGateway(gateway, 'currentPolicy');
@@ -140,6 +148,23 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     const saved = await gateway.savePolicy({ policy: edit.policy, expectedVersion: state.version,
       mutationKey: `update:${updateId}`, delivery: delivery && { ...delivery, render } });
     return render(saved);
+  }
+  if (command === 'signals') {
+    if (args.length > 1 || (args[0] && !/^\d{1,2}$/.test(args[0]))) {
+      return '사용법: <code>/분석갱신</code> · 한 번에 일부 종목만 갱신합니다.';
+    }
+    if (typeof gateway.signals?.refresh !== 'function') {
+      return '시장 데이터 수집이 설정되지 않았습니다.';
+    }
+    requireGateway(gateway, 'listPlans');
+    const budget = Math.min(args[0] ? Number(args[0]) : 10, 30);
+    const result = await gateway.signals.refresh(await gateway.listPlans(true), budget);
+    return ['📡 <b>분석 데이터 갱신</b>',
+      `이번에 ${result.refreshed}종목 갱신 · 실패 ${result.failed}`,
+      `갱신이 더 필요한 종목 ${result.remaining} / 전체 ${result.symbols}`,
+      result.remaining ? '남은 종목이 있으니 <code>/분석갱신</code>을 다시 보내 주세요.' :
+        '모든 종목이 최신입니다. <code>/추천</code>에서 결과를 확인하세요.',
+      '공개 시세·지표만 조회하며 계좌 정보는 보내지 않습니다.'].join('\n');
   }
   if (command === 'recommend') {
     const proposal = await buildProposal(gateway);

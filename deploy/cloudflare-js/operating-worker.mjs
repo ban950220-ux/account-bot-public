@@ -199,7 +199,13 @@ export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
           ]);
           const analyses = gateway.analysisProvider && plans.length ?
             await gateway.analyzePlans(plans, refresh.snapshot) : {};
-          const report = buildPeriodicReport(job, refresh.snapshot, refresh, plans, analyses);
+          let signals = new Map();
+          if (gateway.signalRefreshEnabled && gateway.signals) {
+            try { signals = await gateway.signals.read(plans); }
+            catch { /* Scores are optional; the report is not. */ }
+          }
+          const report = buildPeriodicReport(job, refresh.snapshot, refresh, plans, analyses,
+            signals);
           const chunks = splitTelegramMessage(report);
           // Reserve enqueue batch, outbox read, and begin/finish for every chunk
           // before claiming the period or making the first external send.
@@ -209,6 +215,15 @@ export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
         }
         await deliverRows(config.db, prefix, config, config.chat, sendFetcher, now,
           { d1Budget: budget, externalBudget });
+      }
+      // After delivery, spend what is left of this event's budgets on the stalest
+      // signals. A failure here can never affect a report that was already sent.
+      if (gateway.signalRefreshEnabled && gateway.signals) {
+        try {
+          const room = Math.min(16, 50 - externalBudget.used - 2);
+          budget.assertAvailable(4);
+          if (room > 0) await gateway.signals.refresh(await gateway.listPlans(true), room);
+        } catch { /* Next event retries the same stale symbols. */ }
       }
     },
   };

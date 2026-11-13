@@ -6,6 +6,12 @@ import { html, money } from './assets-report.mjs';
 const zero = () => decimal('0');
 const hundred = () => decimal('100');
 const DEFAULT_STEP = { KRW: '1000', USD: '1' };
+// Broker minimums for a KRW recurring buy; an owner setting overrides them.
+const DEFAULT_MINIMUM = { KRW: '2000', USD: '1' };
+const DEFAULT_BROKER_MINIMUM = { meritz: '1000' };
+const BROKER_WORDS = { 메리츠: 'meritz' };
+const VALUATION_LOW = '35';
+const VALUATION_HIGH = '70';
 const CURRENCIES = ['KRW', 'USD'];
 const TICKER = /^[A-Z0-9][A-Z0-9.]{0,11}$/;
 const MAX_ENTRIES = 50;
@@ -60,6 +66,7 @@ export function normalizePolicy(input = {}) {
     pinned,
     step: currencyMap(input.step, 'step'),
     minimum: currencyMap(input.minimum, 'minimum'),
+    brokerMinimum: sortedMap(input.brokerMinimum, positive, 'brokerMinimum'),
   };
 }
 
@@ -75,7 +82,8 @@ const USAGE = [
   '<code>/목표 종목 10%</code> — 한 종목 상한',
   '<code>/목표 비중 헬스케어 10%</code> — 남는 예산을 채울 노출군 목표',
   '<code>/목표 고정 QQQ,VOO</code> — 추천에서 제외할 종목',
-  '<code>/목표 단위 1000</code> · <code>/목표 최소 1000</code> — 변경 단위·최소 금액(원)',
+  '<code>/목표 단위 1000</code> · <code>/목표 최소 2000</code> — 변경 단위·최소 금액(원)',
+  '<code>/목표 최소 메리츠 1000</code> — 증권사별 최소 금액',
   '값 자리에 <code>없음</code>을 쓰면 해당 설정을 지웁니다.',
 ].join('\n');
 
@@ -90,7 +98,14 @@ export function editPolicy(current, args, knownGroups) {
   const percentValue = text => /^(\d+(?:\.\d+)?)%$/.exec(text || '')?.[1] ?? null;
   const amountValue = text => /^\d[\d,]*$/.test(text || '') ? text.replaceAll(',', '') : null;
   try {
-    if (kind === '예산' || kind === '단위' || kind === '최소') {
+    if (kind === '최소' && rest.length === 2 && rest[0] in BROKER_WORDS) {
+      if (clear) delete next.brokerMinimum[BROKER_WORDS[rest[0]]];
+      else {
+        const amount = amountValue(last);
+        if (amount === null) return fail('금액은 숫자로 입력해 주세요.');
+        next.brokerMinimum[BROKER_WORDS[rest[0]]] = amount;
+      }
+    } else if (kind === '예산' || kind === '단위' || kind === '최소') {
       const field = { 예산: 'dailyBudget', 단위: 'step', 최소: 'minimum' }[kind];
       if (rest.length !== 1) return fail(`${kind}은 금액 하나만 입력합니다.`);
       if (clear) delete next[field].KRW;
@@ -143,15 +158,20 @@ function above(amount, capPct, total) {
   return compare(multiply(amount, hundred()), multiply(total, decimal(capPct))) > 0;
 }
 
+export function minimumFor(plan, policy) {
+  return policy.brokerMinimum[plan.broker] ?? policy.minimum[plan.currency] ??
+    (plan.currency === 'KRW' ? DEFAULT_BROKER_MINIMUM[plan.broker] : undefined) ??
+    DEFAULT_MINIMUM[plan.currency];
+}
+
 function evaluateCurrency(currency, plans, policy) {
   const step = decimal(policy.step[currency] || DEFAULT_STEP[currency]);
-  const minimum = decimal(policy.minimum[currency] || DEFAULT_STEP[currency]);
   const pinned = new Set(policy.pinned);
   const budgetWeekly = policy.dailyBudget[currency] ?
     multiply(decimal(policy.dailyBudget[currency]), decimal('5')) : null;
   const capOf = group => policy.groupCaps[group] ?? policy.defaultGroupCap;
   const items = plans.map(plan => ({ plan, amount: decimal(plan.dailyAmount),
-    days: decimal(String(plan.days)), groups: plan.groups.map(([group, weight]) =>
+    days: decimal(String(plan.days)), minimum: decimal(minimumFor(plan, policy)), groups: plan.groups.map(([group, weight]) =>
       [group, decimal(weight)]), reasons: [],
     movable: plan.adjustable && !pinned.has(plan.ticker) && plan.days > 0 }));
   const weeklyOf = item => multiply(item.amount, item.days);
@@ -194,7 +214,7 @@ function evaluateCurrency(currency, plans, policy) {
   const byLargest = (score, pool, id = item => item.plan.id) => [...pool].sort((a, b) =>
     -compare(score(a), score(b)) || id(a).localeCompare(id(b)));
   const reducible = item => item.movable &&
-    compare(subtract(item.amount, step), minimum) >= 0;
+    compare(subtract(item.amount, step), item.minimum) >= 0;
   function reduce(item, reason) {
     item.amount = subtract(item.amount, step);
     if (!item.reasons.includes(reason)) item.reasons.push(reason);
@@ -202,6 +222,30 @@ function evaluateCurrency(currency, plans, policy) {
 
   const before = totals();
   const violationsBefore = violations(before);
+  // Phase 0: one step per plan from its valuation score, where data exists.
+  // A raise must fit the budget and every cap at the moment it is made.
+  const heldAtMinimum = [];
+  for (const item of items) {
+    const raw = item.plan.signal?.valuationScore;
+    if (!item.movable || raw == null) continue;
+    const score = decimal(raw);
+    const shown = display(score, 1);
+    if (compare(score, decimal(VALUATION_LOW)) < 0) {
+      if (reducible(item)) reduce(item, `Valuation ${shown}점 · 가격 부담`);
+      else heldAtMinimum.push(`${item.plan.label} ${shown}점`);
+    } else if (compare(score, decimal(VALUATION_HIGH)) >= 0) {
+      const state = totals();
+      const increase = multiply(step, item.days);
+      const nextTotal = add(state.total, increase);
+      if (budgetWeekly && compare(nextTotal, budgetWeekly) > 0) continue;
+      if (policy.tickerCap && above(add(state.tickers.get(item.plan.ticker), increase),
+        policy.tickerCap, nextTotal)) continue;
+      if (item.groups.some(([name, weight]) => capOf(name) && above(
+        add(state.groups.get(name), multiply(increase, weight)), capOf(name), nextTotal))) continue;
+      item.amount = add(item.amount, step);
+      item.reasons.push(`Valuation ${shown}점 · 가격 매력`);
+    }
+  }
   // Phase 1: reductions only. Ticker caps, then group caps, then the budget.
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
     const state = totals();
@@ -270,7 +314,7 @@ function evaluateCurrency(currency, plans, policy) {
     action: compare(item.amount, decimal(item.plan.dailyAmount)) > 0 ? '증액' : '감액',
     reasons: item.reasons })) : [];
   const shown = feasible ? after : before;
-  return { currency, feasible, changes,
+  return { currency, feasible, changes, heldAtMinimum,
     violationsBefore: violationsBefore.map(item => item.text),
     unmet: unmet.map(item => item.text),
     budgetWeekly: budgetWeekly === null ? null : exact(budgetWeekly),
@@ -324,7 +368,8 @@ export function formatPolicy(policy, version) {
   }
   if (policy.pinned.length) lines.push(`고정 종목 ${html(policy.pinned.join(', '))}`);
   lines.push(`변경 단위 ${money(policy.step.KRW || DEFAULT_STEP.KRW, 'KRW')} · 최소 ` +
-    money(policy.minimum.KRW || DEFAULT_STEP.KRW, 'KRW'));
+    `${money(policy.minimum.KRW || DEFAULT_MINIMUM.KRW, 'KRW')} · 메리츠 최소 ` +
+    money(policy.brokerMinimum.meritz || policy.minimum.KRW || DEFAULT_BROKER_MINIMUM.meritz, 'KRW'));
   lines.push('', USAGE, '', '이 설정은 계산 기준일 뿐이며 증권사 주문을 만들지 않습니다.');
   return lines.join('\n');
 }
@@ -367,6 +412,9 @@ export function formatEvaluation(results, token) {
         `월평균 ${monthly(result.before.weekly)} → ${monthly(result.after.weekly)}`,
         '노출군 비중 (전 → 후)', ...groupLines(result, 'after'));
     }
+    if (result.heldAtMinimum.length) lines.push(
+      'Valuation 35점 미만이지만 최소 금액이거나 고정이라 그대로 둔 종목: ' +
+      html(result.heldAtMinimum.join(', ')));
     if (result.spareWeekly) lines.push(`여유 예산 주간 ${money(result.spareWeekly, cur)} · ` +
       '채울 노출군 목표가 없거나 상한에 막혀 배분하지 않음');
   }
@@ -375,6 +423,8 @@ export function formatEvaluation(results, token) {
   else if (results.every(result => result.feasible)) lines.push('', '변경할 종목이 없습니다.');
   lines.push('', '사용자가 정한 기준에 따른 계산이며 투자 권유가 아닙니다. ' +
     '봇의 계획 금액만 바뀌고 증권사 주문은 실행하지 않습니다.',
+  'Valuation 점수는 공개 지표를 정해진 규칙으로 계산한 값이며, 35점 미만은 한 단계 감액, ' +
+    '70점 이상은 한 단계 증액으로 반영합니다. ETF는 점수가 없어 금액을 바꾸지 않습니다.',
   '월평균은 주간 × 52 ÷ 12이며 휴장일을 차감하지 않습니다.');
   return lines.join('\n');
 }

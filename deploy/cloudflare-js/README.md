@@ -175,3 +175,29 @@ Each plan currently maps to one exposure group; the calculation already accepts
 weighted multi-group input for a later ETF look-through table. The Worker reads
 a missing `cloud_policy` table as "not installed", so the tables must be created
 on the target D1 before the commands can save anything.
+
+## Market signals and valuation-based proposals
+
+`signals.mjs` reads two public Yahoo Finance endpoints per symbol (five years of
+weekly adjusted closes; for companies, a valuation time series) and stores the
+derived inputs in `cloud_market_cache` for seven days, usable for twenty-one.
+Only a ticker symbol is sent. Trend uses weekly data: 52 and 156 weeks for the
+one- and three-year windows and 40 weekly closes for the 200-day average.
+
+One invocation cannot fetch every symbol, so refresh is incremental: it takes
+the stalest symbols first within a request budget (a fund costs one request, a
+company two) and stores each group of four before starting the next.
+
+- `/분석갱신` (`/signals`) refreshes one batch and reports how many remain.
+- `/모으기` shows cached Valuation and trend scores on one line per plan.
+- `/추천` moves a plan one step down below 35 points and one step up from 70,
+  within the plan's minimum, the budget and every cap. Funds have no valuation
+  score and are never moved by it. Plans that score low but cannot be reduced
+  are listed instead.
+- With `PUBLIC_SIGNAL_REFRESH_ENABLED=true`, scheduled reports include cached
+  scores and, after delivery, spend leftover budget on stale symbols. Without
+  the flag the scheduled path is unchanged.
+
+Minimum amounts default to 2,000 KRW, 1,000 KRW for Meritz; `/목표 최소 2000`
+and `/목표 최소 메리츠 1000` override them. Worker CPU use of a refresh batch on
+the Free plan has not been measured.

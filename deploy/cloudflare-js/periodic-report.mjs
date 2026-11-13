@@ -10,11 +10,12 @@ import { fixed } from './analysis-report.mjs';
 const EMPTY_RECURRING = '🌱 <b>매일모으기</b>\n\n등록된 종목이 없습니다.\n' +
   '<code>/recurring_add AMD 20USD 8%</code>로 로컬 계획을 등록할 수 있습니다.';
 
-export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyses = {}) {
+export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyses = {},
+  signals = new Map()) {
   const assets = formatAssets(snapshot, refresh);
   if (type === 'daily') return [
     '📊 <b>Daily Portfolio Report</b>', '', assets, '', '━━━━━━━━━━', '',
-    plans.length ? formatRecurring(plans, analyses) : EMPTY_RECURRING,
+    plans.length ? formatRecurring(plans, analyses, signals) : EMPTY_RECURRING,
     '', '━━━━━━━━━━', '', '⚠️ <b>주요 변화</b>', '',
     '실적·뉴스 변화는 확인된 데이터만 표시하며, 단기 가격 움직임은 Thesis 변화로 간주하지 않습니다.',
     '', snapshot.isComplete ? '특별 대응 여부는 위 적립 종목별 근거를 확인하세요.' :
