@@ -11,7 +11,7 @@ const EMPTY_RECURRING = '🌱 <b>매일모으기</b>\n\n등록된 종목이 없�
   '<code>/recurring_add AMD 20USD 8%</code>로 로컬 계획을 등록할 수 있습니다.';
 
 export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyses = {},
-  signals = new Map()) {
+  signals = new Map(), summary = null) {
   const assets = formatAssets(snapshot, refresh);
   if (type === 'daily') return [
     '📊 <b>Daily Portfolio Report</b>', '', assets, '', '━━━━━━━━━━', '',
@@ -22,7 +22,12 @@ export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyse
       '오늘은 계좌 데이터가 불완전해 Portfolio 판단을 보류합니다.',
   ].join('\n');
   if (type === 'weekly') {
-    const lines = [
+    // Without account data the asset, performance and allocation sections can only
+    // repeat that nothing is known; the recurring summary replaces them.
+    const plansOnly = typeof summary === 'string' && summary !== '' &&
+      !snapshot.isComplete && !snapshot.positions?.length;
+    const lines = plansOnly ? ['📅 <b>Weekly 모으기 Report</b>', '', summary,
+      '', '━━━━━━━━━━', '', '📊 <b>종목 점수</b> (Valuation · 장기추세, 100점 만점)'] : [
     '📅 <b>Weekly Portfolio Report</b>', '', assets, '', '━━━━━━━━━━', '',
     formatPortfolio(snapshot), '', '━━━━━━━━━━', '', '📈 <b>성과</b>',
     '1W/YTD 수익률은 완전한 과거 snapshot과 입출금 조정 이력이 쌓인 뒤 제공합니다.',
@@ -86,6 +91,7 @@ export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyse
         html(news[0].title.slice(0, 160)));
       lines.push(`Safety ${safety ?? '보류'}`);
     }
+    if (plansOnly) return lines.join('\n');
     lines.push('', '━━━━━━━━━━', '', '⚖️ <b>다음 주 배분</b>');
     const budget = plans.length ? weeklyBudget(plans, refresh.fxQuote?.rate ?? null) : null;
     if (budget === null) lines.push('예상 신규 투자금이 설정되지 않아 배분안은 보류합니다.');

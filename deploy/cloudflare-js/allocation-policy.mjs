@@ -429,6 +429,52 @@ export function formatEvaluation(results, token) {
   return lines.join('\n');
 }
 
+// Head of the weekly report when no brokerage account is connected: what goes
+// out each week, where it is concentrated, and the current proposal in brief.
+export function formatWeeklySummary(results, token) {
+  const lines = [];
+  for (const result of results) {
+    const cur = result.currency;
+    const total = decimal(result.before.weekly);
+    const monthly = value => money(exact(divide28(multiply(decimal(value), decimal('52')),
+      decimal('12'))), cur);
+    lines.push('', `💰 <b>주간 투입액</b> (${cur})`,
+      `주간 ${money(result.before.weekly, cur)} · 월평균 ${monthly(result.before.weekly)}` +
+        (result.budgetWeekly ? ` · 예산 ${money(result.budgetWeekly, cur)}` : ''),
+      '', '🧭 <b>섹터 쏠림</b>');
+    for (const [group, amount] of [...result.before.groups].sort((a, b) =>
+      -compare(decimal(a[1]), decimal(b[1])) || a[0].localeCompare(b[0]))) {
+      const heavy = compare(multiply(decimal(amount), hundred()),
+        multiply(total, decimal('25'))) >= 0;
+      lines.push(`• ${html(group)} ${share(decimal(amount), total)}${heavy ? ' ⚠️' : ''}`);
+    }
+    if (result.violationsBefore.length) {
+      lines.push('설정 기준 위반:', ...result.violationsBefore.map(text => `• ${html(text)}`));
+    }
+    lines.push('', '⚖️ <b>이번 주 추천</b>');
+    if (!result.feasible) {
+      lines.push('모든 기준을 맞추는 안을 만들 수 없어 변경안을 내지 않습니다.');
+      continue;
+    }
+    for (const change of result.changes) {
+      lines.push(`${change.action === '증액' ? '🔺' : '🔻'} <b>${html(change.plan.label)}</b> ` +
+        `${money(change.from, cur)} → ${money(change.to, cur)}`);
+    }
+    if (result.changes.length) {
+      lines.push(`반영 시 주간 ${money(result.before.weekly, cur)} → ` +
+        money(result.after.weekly, cur));
+    } else lines.push('변경할 종목이 없습니다.');
+    if (result.heldAtMinimum.length) lines.push(
+      'Valuation이 낮지만 최소 금액이라 그대로 둔 종목: ' + html(result.heldAtMinimum.join(', ')));
+  }
+  if (!results.length) lines.push('', '활성 모으기 계획이 없습니다.');
+  if (token) lines.push('', '이유는 <code>/추천</code>, 반영은 ' +
+    `<code>/추천적용 ${token}</code> (금액·설정이 바뀌면 무효)`);
+  lines.push('', '⚠️는 한 섹터가 25% 이상일 때 표시합니다. 비중은 신규 투입액 기준입니다.',
+    '정해진 규칙에 따른 계산이며 투자 권유가 아닙니다. 증권사 주문은 실행하지 않습니다.');
+  return lines.slice(1).join('\n');
+}
+
 // Short addendum for the recurring report; empty when nothing is configured.
 export function policyNotice(results, policy) {
   if (!hasRules(policy)) return '';

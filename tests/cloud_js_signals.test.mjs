@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { FakeD1 } from './cloud_js_fake_d1.mjs';
 import { createSignals, signalSymbol, trendFromWeeklyCloses, valuationFromTimeseries } from
   '../deploy/cloudflare-js/signals.mjs';
-import { editPolicy, evaluate, minimumFor, normalizePolicy } from
+import { editPolicy, evaluate, formatWeeklySummary, minimumFor, normalizePolicy } from
   '../deploy/cloudflare-js/allocation-policy.mjs';
 import { formatRecurring } from '../deploy/cloudflare-js/recurring-report.mjs';
 import { buildPeriodicReport } from '../deploy/cloudflare-js/periodic-report.mjs';
@@ -160,4 +160,37 @@ test('the weekly report shows cached scores instead of a missing-analysis notice
   const weekly = buildPeriodicReport('weekly', snapshot, refresh, plans, {}, signals);
   assert.match(weekly, /<b>US:AAA<\/b> Valuation 61\.3 · 장기추세 70\.0\n<b>US:FUND<\/b> 장기추세 88\.0\n/);
   assert.match(weekly, /<b>US:NONE<\/b>\n분석 데이터 부족/);
+  // With account data the summary never replaces the portfolio sections.
+  assert.match(buildPeriodicReport('weekly', snapshot, refresh, plans, {}, signals, 'SUMMARY'),
+    /Weekly Portfolio Report/);
+});
+
+test('without account data the weekly report leads with the recurring summary', () => {
+  const results = evaluate([
+    plan('CHEAP', '2000', '반도체', { signal: { valuationScore: '82.5' } }),
+    plan('FLOOR', '2000', '소프트웨어', { signal: { valuationScore: '10' } }),
+    plan('WIDE', '6000', '미국 광범위 지수')], normalizePolicy({}));
+  const summary = formatWeeklySummary(results, 'abcd1234');
+  assert.match(summary, /^💰 <b>주간 투입액<\/b> \(KRW\)\n주간 50,000원 · 월평균 216,667원\n/);
+  assert.match(summary, /• 미국 광범위 지수 60\.0% ⚠️\n• 반도체 20\.0%\n• 소프트웨어 20\.0%\n/);
+  assert.match(summary, /🔺 <b>US:CHEAP<\/b> 2,000원 → 3,000원\n반영 시 주간 50,000원 → 55,000원/);
+  assert.match(summary, /그대로 둔 종목: US:FLOOR 10\.0점/);
+  assert.match(summary, /<code>\/추천적용 abcd1234<\/code>/);
+  assert.match(formatWeeklySummary(evaluate([plan('ONE', '2000', 'A')], normalizePolicy({})), null),
+    /변경할 종목이 없습니다\./);
+  const snapshot = { expectedBrokers: ['kiwoom_main'], isComplete: false, totalMarketValue: null,
+    includedMarketValue: '0', totalCostBasis: null, includedCostBasis: '0', baseCurrency: 'KRW',
+    positions: [], cashBalances: [] };
+  const refresh = { positionResults: [], cashResults: [], fxQuote: null,
+    collectedAt: '2026-02-02T01:00:00Z' };
+  const weekly = buildPeriodicReport('weekly', snapshot, refresh, [stored('AAA')], {},
+    new Map([['US:AAA:EQUITY:USD', { valuationScore: '61.25', trendScore: '70' }]]), summary);
+  assert.match(weekly, /^📅 <b>Weekly 모으기 Report<\/b>\n\n💰/);
+  assert.match(weekly, /<b>US:AAA<\/b> Valuation 61\.3 · 장기추세 70\.0$/);
+  for (const gone of ['평가금액', '지역 비중', '성과', '다음 주 배분']) {
+    assert.ok(!weekly.includes(gone), gone);
+  }
+  // No summary (no policy support): the previous layout is kept.
+  assert.match(buildPeriodicReport('weekly', snapshot, refresh, [stored('AAA')]),
+    /Weekly Portfolio Report[\s\S]*다음 주 배분/);
 });

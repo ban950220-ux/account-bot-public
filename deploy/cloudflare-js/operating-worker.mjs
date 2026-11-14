@@ -1,6 +1,6 @@
 // Production-boundary candidate. External read-only providers are injected; no default credentials.
 import { admittedUpdateId, dueJobs } from './boundary.mjs';
-import { routeUpdate } from './command-router.mjs';
+import { routeUpdate, weeklyExtras } from './command-router.mjs';
 import { buildPeriodicReport } from './periodic-report.mjs';
 import { beginSend, enqueueReportChunks, enqueueUpdateChunks, finishSend } from './outbox.mjs';
 import { sendTelegramOnce, splitTelegramMessage } from './telegram-transport.mjs';
@@ -200,12 +200,16 @@ export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
           const analyses = gateway.analysisProvider && plans.length ?
             await gateway.analyzePlans(plans, refresh.snapshot) : {};
           let signals = new Map();
+          let summary = null;
           if (gateway.signalRefreshEnabled && gateway.signals) {
-            try { signals = await gateway.signals.read(plans); }
-            catch { /* Scores are optional; the report is not. */ }
+            if (job === 'weekly') ({ signals, summary } = await weeklyExtras(gateway, plans));
+            else {
+              try { signals = await gateway.signals.read(plans); }
+              catch { /* Scores are optional; the report is not. */ }
+            }
           }
           const report = buildPeriodicReport(job, refresh.snapshot, refresh, plans, analyses,
-            signals);
+            signals, summary);
           const chunks = splitTelegramMessage(report);
           // Reserve enqueue batch, outbox read, and begin/finish for every chunk
           // before claiming the period or making the first external send.

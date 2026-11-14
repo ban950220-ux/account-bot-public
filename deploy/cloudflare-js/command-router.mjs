@@ -4,7 +4,7 @@ import { START, HELP } from './static-commands.mjs';
 import { formatAssets, html, money } from './assets-report.mjs';
 import { formatPortfolio, formatAccounts } from './portfolio-report.mjs';
 import { exposure, exposureLabels, formatRecurring } from './recurring-report.mjs';
-import { editPolicy, evaluate, formatEvaluation, formatPolicy, policyNotice,
+import { editPolicy, evaluate, formatEvaluation, formatPolicy, formatWeeklySummary, policyNotice,
   proposalFingerprint } from './allocation-policy.mjs';
 import { stockReply, instrumentParts, rebalanceReply } from './dynamic-commands.mjs';
 import { buildPeriodicReport } from './periodic-report.mjs';
@@ -63,11 +63,12 @@ async function planAnalyses(gateway, plans, snapshot) {
 // Deterministic proposal from current plans and the owner's policy. The token
 // binds an approval to the exact policy version, plan versions and amounts shown.
 // With `known` plans the result is for display only: nothing is adjustable.
-async function buildProposal(gateway, known = null) {
-  for (const method of known ? ['currentPolicy'] :
-    ['listPlans', 'currentPolicy', 'editablePlanKeys']) requireGateway(gateway, method);
+// `adjust` with known plans keeps them adjustable without listing them again.
+async function buildProposal(gateway, known = null, adjust = !known) {
+  for (const method of [...(known ? [] : ['listPlans']), 'currentPolicy',
+    ...(adjust ? ['editablePlanKeys'] : [])]) requireGateway(gateway, method);
   const [plans, state, editable] = await Promise.all([known || gateway.listPlans(true),
-    gateway.currentPolicy(), known ? new Set() : gateway.editablePlanKeys()]);
+    gateway.currentPolicy(), adjust ? gateway.editablePlanKeys() : new Set()]);
   let signals = new Map();
   if (typeof gateway.signals?.read === 'function') {
     try { signals = await gateway.signals.read(plans); }
@@ -94,6 +95,24 @@ async function buildProposal(gateway, known = null) {
     token = [...bytes.slice(0, 4)].map(byte => byte.toString(16).padStart(2, '0')).join('');
   }
   return { state, results, token, signals };
+}
+
+// Scores and the recurring summary for the weekly report. Both are optional:
+// a gateway without policy support, or any failure here, keeps the plain report.
+export async function weeklyExtras(gateway, plans) {
+  try {
+    if (typeof gateway.currentPolicy !== 'function' ||
+        typeof gateway.editablePlanKeys !== 'function') throw new Error('no policy support');
+    const proposal = await buildProposal(gateway, plans, true);
+    return { signals: proposal.signals,
+      summary: proposal.state.installed === false ? null :
+        formatWeeklySummary(proposal.results, proposal.token) };
+  } catch {
+    let signals = new Map();
+    try { if (typeof gateway.signals?.read === 'function') signals = await gateway.signals.read(plans); }
+    catch { /* Scores are optional; the report is not. */ }
+    return { signals, summary: null };
+  }
 }
 
 async function replyFor(parsed, gateway, updateId, signal, delivery) {
@@ -210,12 +229,9 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     const [refresh, plans] = await Promise.all([gateway.refresh({ force: true,
       allBrokers: false }), gateway.listPlans(true)]);
     const analyses = await planAnalyses(gateway, plans, refresh.snapshot);
-    let signals = new Map();
-    if (typeof gateway.signals?.read === 'function') {
-      try { signals = await gateway.signals.read(plans); }
-      catch { /* Scores are optional; the report is not. */ }
-    }
-    return buildPeriodicReport('weekly', refresh.snapshot, refresh, plans, analyses, signals);
+    const extra = await weeklyExtras(gateway, plans);
+    return buildPeriodicReport('weekly', refresh.snapshot, refresh, plans, analyses,
+      extra.signals, extra.summary);
   }
   if (command === 'analyze') {
     if (!args.length) return '사용법: <code>/analyze AMD</code>';
