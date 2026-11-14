@@ -6,6 +6,7 @@ import { createSignals, signalSymbol, trendFromWeeklyCloses, valuationFromTimese
 import { editPolicy, evaluate, minimumFor, normalizePolicy } from
   '../deploy/cloudflare-js/allocation-policy.mjs';
 import { formatRecurring } from '../deploy/cloudflare-js/recurring-report.mjs';
+import { buildPeriodicReport } from '../deploy/cloudflare-js/periodic-report.mjs';
 
 const instrument = (ticker, assetType = 'EQUITY') => ({ market: 'US', ticker, assetType,
   currency: 'USD' });
@@ -145,4 +146,18 @@ test('the recurring report shows cached scores on one line', () => {
   assert.match(report, /\n장기추세 88\.0 \/ 100/);
   assert.ok(!report.includes('종목 분석 데이터가 없어'));
   assert.ok(formatRecurring(plans, {}).includes('종목 분석 데이터가 없어'));
+});
+
+test('the weekly report shows cached scores instead of a missing-analysis notice', () => {
+  const plans = [stored('AAA'), stored('FUND', 'ETF'), stored('NONE')];
+  const signals = new Map([['US:AAA:EQUITY:USD', { valuationScore: '61.25', trendScore: '70' }],
+    ['US:FUND:ETF:USD', { valuationScore: null, trendScore: '88.04' }]]);
+  const snapshot = { expectedBrokers: ['kiwoom_main'], isComplete: true,
+    totalMarketValue: '0', includedMarketValue: '0', totalCostBasis: null,
+    baseCurrency: 'KRW', positions: [], cashBalances: [] };
+  const refresh = { positionResults: [{ broker: 'kiwoom_main', status: 'ok', items: [] }],
+    cashResults: [], fxQuote: null, collectedAt: '2026-02-02T01:00:00Z' };
+  const weekly = buildPeriodicReport('weekly', snapshot, refresh, plans, {}, signals);
+  assert.match(weekly, /<b>US:AAA<\/b> Valuation 61\.3 · 장기추세 70\.0\n<b>US:FUND<\/b> 장기추세 88\.0\n/);
+  assert.match(weekly, /<b>US:NONE<\/b>\n분석 데이터 부족/);
 });

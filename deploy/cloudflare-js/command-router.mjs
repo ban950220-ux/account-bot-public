@@ -210,7 +210,12 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     const [refresh, plans] = await Promise.all([gateway.refresh({ force: true,
       allBrokers: false }), gateway.listPlans(true)]);
     const analyses = await planAnalyses(gateway, plans, refresh.snapshot);
-    return buildPeriodicReport('weekly', refresh.snapshot, refresh, plans, analyses);
+    let signals = new Map();
+    if (typeof gateway.signals?.read === 'function') {
+      try { signals = await gateway.signals.read(plans); }
+      catch { /* Scores are optional; the report is not. */ }
+    }
+    return buildPeriodicReport('weekly', refresh.snapshot, refresh, plans, analyses, signals);
   }
   if (command === 'analyze') {
     if (!args.length) return '사용법: <code>/analyze AMD</code>';

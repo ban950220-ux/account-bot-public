@@ -32,14 +32,30 @@ export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyse
       ['continue_buy', '증액'], ['maintain', '유지'], ['reduce', '감액'],
       ['review_stop', '중단 검토'], ['review_required', '중요 경고 재검토'],
       ['unavailable', 'Valuation 데이터 부족으로 판단 보류']]);
+    let compact = false;
     for (const plan of plans) {
       const identity = `${plan.instrument.market}:${plan.instrument.ticker}`;
       const full = `${identity}:${plan.instrument.assetType}:${plan.instrument.currency}`;
       const analysis = analyses[full];
       if (!analysis) {
+        // Cached public scores stand in when no full analysis provider is bound.
+        const signal = signals.get(full);
+        const shown = value => display(decimal(value), 1);
+        const scores = [signal?.valuationScore != null ?
+          `Valuation ${shown(signal.valuationScore)}` : null,
+        signal?.trendScore != null ? `장기추세 ${shown(signal.trendScore)}` : null]
+          .filter(Boolean).join(' · ');
+        if (scores) {
+          if (!compact) lines.push('');
+          lines.push(`<b>${html(identity)}</b> ${scores}`);
+          compact = true;
+          continue;
+        }
+        compact = false;
         lines.push('', `<b>${html(identity)}</b>`, '분석 데이터 부족');
         continue;
       }
+      compact = false;
       if (analysis.companyScore.components.length < 5 ||
           !decisions.has(analysis.finalScore.decision)) {
         throw new TypeError('incomplete weekly analysis');
