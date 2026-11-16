@@ -1,6 +1,6 @@
 # 운영 Worker 클라우드 배포 (GitHub Actions) — 설계
 
-상태: 1단계 진행 중 · 작성 2026-11-16
+상태: 1단계 완료, 2단계 대기 · 작성 2026-11-16
 
 ## 목표
 
@@ -71,3 +71,7 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 - 추가: `package.json`, `package-lock.json`(wrangler 4.156.1, 38 packages), `deploy/cloudflare-js/wrangler.production.json`, `.github/workflows/deploy-worker.yml`, `.gitignore`에 `/node_modules/`, `.wrangler/`
 - 로컬 `wrangler deploy --dry-run` 번들 성공(279.55 KiB, gzip 67.24 KiB). 바인딩은 D1 1개와 변수 7개이며, Worker secret 4개와 합쳐 기존 12개와 일치한다.
 - workflow는 `workflow_dispatch` 전용이다. 실행 파일이 기본 브랜치에 있어야 버튼이 생기므로 master에 올린다. 운영에는 영향이 없다.
+- Actions `check` run #1 성공: 토큰 유효, 현재 운영 `9d81836d` 100%, Worker URL `https://account-bot-production.ban950220.workers.dev`, 버전 목록 조회됨.
+- 이슈: `wrangler whoami`와 `versions list`의 Author가 계정 이메일을 공개 로그에 출력했다. run #1 로그는 삭제했다. 토큰 확인을 `/user/tokens/verify`로 바꾸고, 모든 wrangler 출력에 이메일 가리기 필터를 넣었다(`6f53821`).
+- Actions `check` run #2 성공: `토큰 상태: active`, Author가 `[email]`로 가려짐, Account ID `***`. **1단계 완료.**
+- run #2가 잠깐 `waiting`으로 보였던 것은 Environment job이 runner를 기다리는 상태였다. 승인 대기가 아니었다(Required reviewers 미설정).
