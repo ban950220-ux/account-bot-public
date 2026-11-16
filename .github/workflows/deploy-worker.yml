@@ -27,6 +27,8 @@ env:
   CONFIG: deploy/cloudflare-js/wrangler.production.json
   WORKER: account-bot-production
   WRANGLER_SEND_METRICS: "false"
+  # Public repository: Actions logs are public. Strip e-mail addresses from tool output.
+  REDACT: 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]+/[email]/g'
 
 jobs:
   test:
@@ -71,7 +73,8 @@ jobs:
           set -euo pipefail
           api() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID$1"; }
-          npx wrangler whoami
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            https://api.cloudflare.com/client/v4/user/tokens/verify | jq -r '"토큰 상태: \(.result.status)"'
           api "/workers/scripts/$WORKER/deployments" > deployments.json
           jq -r '.result.deployments[0] | "현재 배포: \(.created_on) · " +
             ([.versions[] | "\(.version_id) \(.percentage)%"] | join(", "))' deployments.json
@@ -79,21 +82,21 @@ jobs:
           sub=$(api /workers/subdomain | jq -r '.result.subdomain')
           echo "WORKER_URL=https://$WORKER.$sub.workers.dev" >> "$GITHUB_ENV"
           echo "Worker URL: https://$WORKER.$sub.workers.dev"
-          npx wrangler versions list --config "$CONFIG" | tail -n 30
+          npx wrangler versions list --config "$CONFIG" 2>&1 | sed -E "$REDACT" | tail -n 30
 
       - name: Upload and deploy
         if: inputs.action == 'deploy'
         run: |
           set -euo pipefail
           out=$(npx wrangler versions upload --config "$CONFIG" \
-            --message "github ${GITHUB_SHA::7}" 2>&1) || { echo "$out"; exit 1; }
-          echo "$out"
+            --message "github ${GITHUB_SHA::7}" 2>&1) || { echo "$out" | sed -E "$REDACT"; exit 1; }
+          echo "$out" | sed -E "$REDACT"
           id=$(echo "$out" | grep -oE 'Worker Version ID: [0-9a-f-]{36}' | awk '{print $4}')
           test -n "$id" || { echo "새 버전 ID를 찾지 못했습니다"; exit 1; }
           echo "TARGET_VERSION=$id" >> "$GITHUB_ENV"
           echo "되돌리기용 직전 버전: $(cat previous.txt)"
           npx wrangler versions deploy "$id@100%" --config "$CONFIG" \
-            --message "github ${GITHUB_SHA::7}" --yes
+            --message "github ${GITHUB_SHA::7}" --yes 2>&1 | sed -E "$REDACT"
 
       - name: Roll back
         if: inputs.action == 'rollback'
@@ -104,7 +107,7 @@ jobs:
           echo "TARGET_VERSION=$VERSION_ID" >> "$GITHUB_ENV"
           echo "되돌리기 전 버전: $(cat previous.txt)"
           npx wrangler versions deploy "$VERSION_ID@100%" --config "$CONFIG" \
-            --message "github rollback" --yes
+            --message "github rollback" --yes 2>&1 | sed -E "$REDACT"
 
       - name: Verify production
         if: inputs.action != 'check'
