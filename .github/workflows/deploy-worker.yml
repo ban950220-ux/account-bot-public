@@ -76,9 +76,10 @@ jobs:
           curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             https://api.cloudflare.com/client/v4/user/tokens/verify | jq -r '"토큰 상태: \(.result.status)"'
           api "/workers/scripts/$WORKER/deployments" > deployments.json
-          jq -r '.result.deployments[0] | "현재 배포: \(.created_on) · " +
+          jq -r '.result.deployments | sort_by(.created_on) | last | "현재 배포: \(.created_on) · " +
             ([.versions[] | "\(.version_id) \(.percentage)%"] | join(", "))' deployments.json
-          jq -r '.result.deployments[0].versions[0].version_id' deployments.json > previous.txt
+          jq -r '.result.deployments | sort_by(.created_on) | last | .versions[0].version_id' \
+            deployments.json > previous.txt
           sub=$(api /workers/subdomain | jq -r '.result.subdomain')
           echo "WORKER_URL=https://$WORKER.$sub.workers.dev" >> "$GITHUB_ENV"
           echo "Worker URL: https://$WORKER.$sub.workers.dev"
@@ -115,9 +116,16 @@ jobs:
           set -euo pipefail
           api() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID$1"; }
-          live=$(api "/workers/scripts/$WORKER/deployments" |
-            jq -r '.result.deployments[0].versions | select(length == 1) | .[0] |
-              select(.percentage == 100) | .version_id')
+          # The deployments list can lag a few seconds behind `versions deploy`.
+          live=""
+          for i in 1 2 3 4 5 6; do
+            live=$(api "/workers/scripts/$WORKER/deployments" |
+              jq -r '.result.deployments | sort_by(.created_on) | last | .versions |
+                select(length == 1) | .[0] | select(.percentage == 100) | .version_id')
+            [ "$live" = "$TARGET_VERSION" ] && break
+            echo "아직 반영 전 ($live), 10초 후 다시 확인"
+            sleep 10
+          done
           test "$live" = "$TARGET_VERSION" || { echo "100% 버전이 $live 입니다 (기대: $TARGET_VERSION)"; exit 1; }
           echo "운영 100%: $live"
           # Unauthenticated POST must be refused (403); 503 means config is broken.
