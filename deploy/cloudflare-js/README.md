@@ -197,6 +197,12 @@ company two) and stores each group of four before starting the next.
 - With `PUBLIC_SIGNAL_REFRESH_ENABLED=true`, scheduled reports include cached
   scores and, after delivery, spend leftover budget on stale symbols. Without
   the flag the scheduled path is unchanged.
+- Without account data the weekly report becomes `Weekly 모으기 Report`: the
+  weekly amount, exposure concentration and proposal summary replace the asset,
+  performance and allocation sections. The daily report becomes
+  `Daily 모으기 Report` (recurring plans and 주요 변화 only) when every expected
+  broker reports `not_configured`. A configured broker that fails (auth, rate
+  limit, unavailable) or returns no result keeps the partial-total warning.
 
 Minimum amounts default to 2,000 KRW, 1,000 KRW for Meritz; `/목표 최소 2000`
 and `/목표 최소 메리츠 1000` override them. Worker CPU use of a refresh batch on

@@ -10,17 +10,33 @@ import { fixed } from './analysis-report.mjs';
 const EMPTY_RECURRING = '🌱 <b>매일모으기</b>\n\n등록된 종목이 없습니다.\n' +
   '<code>/recurring_add AMD 20USD 8%</code>로 로컬 계획을 등록할 수 있습니다.';
 
+// True only when every expected broker reported `not_configured` and nothing was
+// read. Errors, missing results or any position keep the normal asset block.
+function noAccountConfigured(snapshot, { positionResults = [], cashResults = [] } = {}) {
+  const results = [...positionResults, ...cashResults];
+  const brokers = snapshot.expectedBrokers ?? [];
+  return !snapshot.isComplete && !snapshot.positions?.length && brokers.length > 0 &&
+    results.length > 0 && results.every(result => result.status === 'not_configured') &&
+    brokers.every(broker => results.some(result => result.broker === broker));
+}
+
 export function buildPeriodicReport(type, snapshot, refresh, plans = [], analyses = {},
   signals = new Map(), summary = null) {
   const assets = formatAssets(snapshot, refresh);
-  if (type === 'daily') return [
-    '📊 <b>Daily Portfolio Report</b>', '', assets, '', '━━━━━━━━━━', '',
-    plans.length ? formatRecurring(plans, analyses, signals) : EMPTY_RECURRING,
-    '', '━━━━━━━━━━', '', '⚠️ <b>주요 변화</b>', '',
-    '실적·뉴스 변화는 확인된 데이터만 표시하며, 단기 가격 움직임은 Thesis 변화로 간주하지 않습니다.',
-    '', snapshot.isComplete ? '특별 대응 여부는 위 적립 종목별 근거를 확인하세요.' :
-      '오늘은 계좌 데이터가 불완전해 Portfolio 판단을 보류합니다.',
-  ].join('\n');
+  if (type === 'daily') {
+    const recurring = plans.length ? formatRecurring(plans, analyses, signals) : EMPTY_RECURRING;
+    const changes = ['⚠️ <b>주요 변화</b>', '',
+      '실적·뉴스 변화는 확인된 데이터만 표시하며, 단기 가격 움직임은 Thesis 변화로 간주하지 않습니다.'];
+    // With no brokerage account configured the asset block can only repeat that
+    // nothing is known. A configured account that failed keeps its warning.
+    if (noAccountConfigured(snapshot, refresh)) return ['📊 <b>Daily 모으기 Report</b>', '',
+      recurring, '', '━━━━━━━━━━', '', ...changes].join('\n');
+    return ['📊 <b>Daily Portfolio Report</b>', '', assets, '', '━━━━━━━━━━', '',
+      recurring, '', '━━━━━━━━━━', '', ...changes,
+      '', snapshot.isComplete ? '특별 대응 여부는 위 적립 종목별 근거를 확인하세요.' :
+        '오늘은 계좌 데이터가 불완전해 Portfolio 판단을 보류합니다.',
+    ].join('\n');
+  }
   if (type === 'weekly') {
     // Without account data the asset, performance and allocation sections can only
     // repeat that nothing is known; the recurring summary replaces them.

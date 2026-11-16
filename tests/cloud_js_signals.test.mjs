@@ -194,3 +194,31 @@ test('without account data the weekly report leads with the recurring summary', 
   assert.match(buildPeriodicReport('weekly', snapshot, refresh, [stored('AAA')]),
     /Weekly Portfolio Report[\s\S]*다음 주 배분/);
 });
+
+test('with no account configured the daily report drops the asset block', () => {
+  const snapshot = { expectedBrokers: ['kiwoom_main'], isComplete: false, totalMarketValue: null,
+    includedMarketValue: '0', totalCostBasis: null, includedCostBasis: '0', baseCurrency: 'KRW',
+    positions: [], cashBalances: [] };
+  const unconfigured = { positionResults: [{ broker: 'kiwoom_main', status: 'not_configured',
+    items: [] }], cashResults: [], fxQuote: null, collectedAt: '2026-02-02T01:00:00Z' };
+  const plans = [stored('AAA')];
+  const signals = new Map([['US:AAA:EQUITY:USD', { valuationScore: '61.25', trendScore: '70' }]]);
+  const daily = buildPeriodicReport('daily', snapshot, unconfigured, plans, {}, signals);
+  assert.match(daily, /^📊 <b>Daily 모으기 Report<\/b>\n\n/);
+  assert.match(daily, /Valuation 61\.3 \/ 100/);
+  assert.match(daily, /주요 변화/);
+  for (const gone of ['평가금액', '투자원금', '증권사', '미설정', '지역 비중', '불완전 조회',
+    'Portfolio 판단을 보류']) {
+    assert.ok(!daily.includes(gone), gone);
+  }
+  // A configured account that failed still shows the partial-result warning.
+  for (const status of ['auth_failed', 'rate_limited', 'unavailable']) {
+    const failed = { ...unconfigured, positionResults: [{ broker: 'kiwoom_main', status,
+      items: [] }] };
+    assert.match(buildPeriodicReport('daily', snapshot, failed, plans, {}, signals),
+      /Daily Portfolio Report[\s\S]*확인 자산 부분 합계[\s\S]*Portfolio 판단을 보류/, status);
+  }
+  // No broker results at all is not proof of "unconfigured": keep the warning.
+  assert.match(buildPeriodicReport('daily', snapshot, { ...unconfigured, positionResults: [] },
+    plans, {}, signals), /Daily Portfolio Report[\s\S]*확인 자산 부분 합계/);
+});
