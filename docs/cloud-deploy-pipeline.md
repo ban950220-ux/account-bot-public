@@ -1,6 +1,6 @@
 # 운영 Worker 클라우드 배포 (GitHub Actions) — 설계
 
-상태: 1단계 완료, 2단계 대기 · 작성 2026-11-16
+상태: 2단계 완료, 3단계 대기 · 작성 2026-11-16
 
 ## 목표
 
@@ -75,3 +75,11 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 - 이슈: `wrangler whoami`와 `versions list`의 Author가 계정 이메일을 공개 로그에 출력했다. run #1 로그는 삭제했다. 토큰 확인을 `/user/tokens/verify`로 바꾸고, 모든 wrangler 출력에 이메일 가리기 필터를 넣었다(`6f53821`).
 - Actions `check` run #2 성공: `토큰 상태: active`, Author가 `[email]`로 가려짐, Account ID `***`. **1단계 완료.**
 - run #2가 잠깐 `waiting`으로 보였던 것은 Environment job이 runner를 기다리는 상태였다. 승인 대기가 아니었다(Required reviewers 미설정).
+
+### 2단계
+
+- Actions `deploy` run #3 (master `194058c`): Worker 테스트 통과, 새 버전 `fd4b7b24-7102-4aa2-a2e7-7f7d888472e3` 업로드, wrangler가 `SUCCESS ... at 100%`로 배포했다.
+- 이슈: 확인 단계가 배포 0.1초 뒤 Cloudflare 배포 목록을 읽어 아직 `9d81836d`가 보였고, run이 실패로 끝났다. 배포 자체는 성공했다. 확인 단계를 최신 `created_on` 기준으로 읽고 최대 1분 재시도하도록 고쳤다(`e228743`).
+- Actions `check` run #4: `현재 배포: 2026-11-16T12:25:18Z · fd4b7b24 100%`. 이 세션에서 webhook 무인증 POST를 보내 `403`을 받았다.
+- **2단계 완료.** 남은 확인: 다음 평일(11/17) 08:00 일간보가 `Daily 모으기 Report`로 오는지 사용자가 확인한다.
+- 되돌릴 직전 버전: `9d81836d-7a3d-48e1-add8-3a5e1832a7e6`
