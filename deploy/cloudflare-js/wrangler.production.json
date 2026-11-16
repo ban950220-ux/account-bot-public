@@ -1,0 +1,24 @@
+{
+  "name": "account-bot-production",
+  "main": "operating-worker.mjs",
+  "compatibility_date": "2026-05-15",
+  "send_metrics": false,
+  "workers_dev": true,
+  "keep_vars": false,
+  "vars": {
+    "CLOUD_PORTFOLIO_ID": "1",
+    "CLOUD_TARGET_ID": "account-bot-production",
+    "DAILY_REPORT_TIME": "08:00:00",
+    "REPORT_TIMEZONE": "Asia/Seoul",
+    "WEEKLY_REPORT_TIME": "09:00:00",
+    "WEEKLY_REPORT_WEEKDAY": "5",
+    "PUBLIC_SIGNAL_REFRESH_ENABLED": "true"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "account-bot-production",
+      "database_id": "aa55d17f-9560-4e48-b06c-166c53a21126"
+    }
+  ]
+}

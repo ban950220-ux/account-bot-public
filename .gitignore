@@ -57,3 +57,8 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Worker deploy tooling
+/node_modules/
+/.wrangler/
+/deploy/cloudflare-js/.wrangler/

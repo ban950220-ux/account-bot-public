@@ -1,6 +1,6 @@
 # 운영 Worker 클라우드 배포 (GitHub Actions) — 설계
 
-상태: 설계 확인 대기 · 작성 2026-11-16
+상태: 1단계 진행 중 · 작성 2026-11-16
 
 ## 목표
 
@@ -58,8 +58,16 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 - wrangler 개발 의존성 추가 승인. (사용자 결정 2026-11-16)
 - Account ID는 Actions 로그에서 가려지도록 Secret에 둔다.
 - Secret은 Repository가 아닌 Environment `production`에 둔다. master에서만 배포되게 제한할 수 있고, 승인 버튼을 걸 수 있다.
+- 배포 시점은 수동 실행만 쓴다. master 푸시만으로는 배포되지 않는다. (사용자 결정 2026-11-16)
+- Environment `production`은 사용자가 만들었다. 배포 브랜치는 master로 제한하고 Secret 2개를 넣었다.
+- workers.dev 주소는 workflow가 Cloudflare API(`/workers/subdomain`)로 읽는다.
+- "Daily 모으기 Report" 제목은 유지한다. (사용자 결정 2026-11-16)
+- 전환 후 PC `prod-ops`에서는 배포하지 않는다. 비상용으로만 남긴다. (사용자 확인 2026-11-16)
 
-## 미정
+## 단계별 기록
 
-- 배포 시점: 수동 버튼만 쓸지, master 푸시 때 자동으로 배포할지.
-- 배포 확인용 workers.dev 주소.
+### 1단계
+
+- 추가: `package.json`, `package-lock.json`(wrangler 4.156.1, 38 packages), `deploy/cloudflare-js/wrangler.production.json`, `.github/workflows/deploy-worker.yml`, `.gitignore`에 `/node_modules/`, `.wrangler/`
+- 로컬 `wrangler deploy --dry-run` 번들 성공(279.55 KiB, gzip 67.24 KiB). 바인딩은 D1 1개와 변수 7개이며, Worker secret 4개와 합쳐 기존 12개와 일치한다.
+- workflow는 `workflow_dispatch` 전용이다. 실행 파일이 기본 브랜치에 있어야 버튼이 생기므로 master에 올린다. 운영에는 영향이 없다.

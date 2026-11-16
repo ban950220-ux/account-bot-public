@@ -207,3 +207,18 @@ company two) and stores each group of four before starting the next.
 Minimum amounts default to 2,000 KRW, 1,000 KRW for Meritz; `/목표 최소 2000`
 and `/목표 최소 메리츠 1000` override them. Worker CPU use of a refresh batch on
 the Free plan has not been measured.
+
+## Production deploy from GitHub Actions
+
+`.github/workflows/deploy-worker.yml` runs only on manual dispatch from master,
+in the `production` environment (secrets `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID`). Config is `wrangler.production.json`; wrangler is
+pinned in the root `package.json`.
+
+- `check`: whoami, current deployment, versions list. Read-only.
+- `deploy`: Worker tests, `versions upload`, `versions deploy <id>@100%`, then
+  confirms the new version is at 100% and an unauthenticated webhook POST gets 403.
+- `rollback`: `versions deploy <version_id>@100%` with the same checks.
+
+It never uses `wrangler deploy`, so cron triggers and Worker secrets are not
+rewritten. No Telegram message is sent. Design: `docs/cloud-deploy-pipeline.md`.

@@ -1,0 +1,9 @@
+{
+  "name": "account-bot-worker-deploy",
+  "private": true,
+  "description": "Pinned deploy tooling for the production Cloudflare Worker. Not a runtime dependency.",
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "wrangler": "4.156.1"
+  }
+}

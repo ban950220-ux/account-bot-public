@@ -1,0 +1,128 @@
+name: Deploy Worker
+
+# Manual only. Uses `versions upload` + `versions deploy` so cron triggers and
+# Worker secrets are never rewritten. No Telegram message is sent.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "check: read-only status · deploy: test, upload and deploy master · rollback: redeploy version_id"
+        type: choice
+        options: [check, deploy, rollback]
+        default: check
+        required: true
+      version_id:
+        description: "rollback only: Worker version ID to put back at 100%"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker-production
+  cancel-in-progress: false
+
+env:
+  CONFIG: deploy/cloudflare-js/wrangler.production.json
+  WORKER: account-bot-production
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  test:
+    name: Worker tests
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test D1 and Worker contracts without external calls
+        env:
+          NODE_OPTIONS: --import=./tests/cloud_deny_network.mjs
+        run: node --test tests/cloud_js_*.test.mjs
+
+  cloudflare:
+    name: ${{ inputs.action }}
+    needs: test
+    if: >-
+      always() && github.ref == 'refs/heads/master' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ACTION: ${{ inputs.action }}
+      VERSION_ID: ${{ inputs.version_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned wrangler
+        run: npm ci --no-audit --no-fund
+
+      - name: Check credentials and current deployment
+        run: |
+          set -euo pipefail
+          api() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID$1"; }
+          npx wrangler whoami
+          api "/workers/scripts/$WORKER/deployments" > deployments.json
+          jq -r '.result.deployments[0] | "현재 배포: \(.created_on) · " +
+            ([.versions[] | "\(.version_id) \(.percentage)%"] | join(", "))' deployments.json
+          jq -r '.result.deployments[0].versions[0].version_id' deployments.json > previous.txt
+          sub=$(api /workers/subdomain | jq -r '.result.subdomain')
+          echo "WORKER_URL=https://$WORKER.$sub.workers.dev" >> "$GITHUB_ENV"
+          echo "Worker URL: https://$WORKER.$sub.workers.dev"
+          npx wrangler versions list --config "$CONFIG" | tail -n 30
+
+      - name: Upload and deploy
+        if: inputs.action == 'deploy'
+        run: |
+          set -euo pipefail
+          out=$(npx wrangler versions upload --config "$CONFIG" \
+            --message "github ${GITHUB_SHA::7}" 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          id=$(echo "$out" | grep -oE 'Worker Version ID: [0-9a-f-]{36}' | awk '{print $4}')
+          test -n "$id" || { echo "새 버전 ID를 찾지 못했습니다"; exit 1; }
+          echo "TARGET_VERSION=$id" >> "$GITHUB_ENV"
+          echo "되돌리기용 직전 버전: $(cat previous.txt)"
+          npx wrangler versions deploy "$id@100%" --config "$CONFIG" \
+            --message "github ${GITHUB_SHA::7}" --yes
+
+      - name: Roll back
+        if: inputs.action == 'rollback'
+        run: |
+          set -euo pipefail
+          [[ "$VERSION_ID" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] ||
+            { echo "version_id는 전체 UUID여야 합니다"; exit 1; }
+          echo "TARGET_VERSION=$VERSION_ID" >> "$GITHUB_ENV"
+          echo "되돌리기 전 버전: $(cat previous.txt)"
+          npx wrangler versions deploy "$VERSION_ID@100%" --config "$CONFIG" \
+            --message "github rollback" --yes
+
+      - name: Verify production
+        if: inputs.action != 'check'
+        run: |
+          set -euo pipefail
+          api() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID$1"; }
+          live=$(api "/workers/scripts/$WORKER/deployments" |
+            jq -r '.result.deployments[0].versions | select(length == 1) | .[0] |
+              select(.percentage == 100) | .version_id')
+          test "$live" = "$TARGET_VERSION" || { echo "100% 버전이 $live 입니다 (기대: $TARGET_VERSION)"; exit 1; }
+          echo "운영 100%: $live"
+          # Unauthenticated POST must be refused (403); 503 means config is broken.
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H 'content-type: application/json' --data '{}' "$WORKER_URL/telegram/webhook")
+            echo "webhook 무인증 POST: $code"
+            [ "$code" = 403 ] && exit 0
+            sleep 10
+          done
+          exit 1
