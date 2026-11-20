@@ -232,6 +232,30 @@ export class SyntheticCloudGateway {
       .map(toDomain);
   }
 
+  // Several owner edits from one message: every listed plan at its expected version, or none.
+  // Unlike applyAmounts this also sees disabled plans so they can be switched back ON.
+  async editPlans({ changes, mutationKey, delivery = null }) {
+    const editable = await this.editableFilter();
+    const current = await listCurrentPlans(this.db);
+    const work = changes.map(change => {
+      const plan = current.find(row => row.planKey === change.planKey);
+      if (!plan || !editable(plan) || plan.version !== change.expectedVersion ||
+          typeof change.enabled !== 'boolean' ||
+          compare(decimal(change.dailyAmount), decimal('0.00000001')) < 0) {
+        throw new TypeError('stale or foreign plan edit');
+      }
+      return { planKey: plan.planKey, expectedVersion: plan.version, nextState: { ...plan,
+        dailyAmount: exact(decimal(change.dailyAmount)), enabled: change.enabled } };
+    });
+    const staged = delivery && { ...delivery,
+      reply: delivery.render(work.map(item => toDomain(item.nextState))) };
+    const result = await applyGroupChanges(this.db, work, mutationKey, this.now(), staged);
+    if (result !== 'CHANGED') throw new Error('plans changed concurrently');
+    const keys = new Set(work.map(item => item.planKey));
+    return (await listCurrentPlans(this.db)).filter(plan => keys.has(plan.planKey))
+      .map(toDomain);
+  }
+
   async changeGroup({ assetType, delta, stop, excluded, mutationKey, delivery = null }) {
     const editable = await this.editableFilter();
     const replayKeys = await groupMutationPlans(this.db, mutationKey);

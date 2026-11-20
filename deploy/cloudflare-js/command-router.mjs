@@ -115,6 +115,77 @@ export async function weeklyExtras(gateway, plans) {
   }
 }
 
+const SET_PREFIX = /^\/(?:모으기설정|recurring_set)(?:@[A-Za-z0-9_]+)?(?=\s|$)/i;
+const SET_LIMIT = 30;
+const SET_USAGE = '한 줄에 하나씩 보내 주세요.\n<code>/모으기설정 QQQ 4000</code>\n' +
+  '<code>/모으기설정 MPWR OFF</code>\n<code>/모으기설정 MPWR 2000 ON</code>';
+
+// All-or-nothing: any bad line changes nothing and names the line to fix.
+async function setPlansBatch(lines, gateway, updateId, signal, delivery) {
+  if (lines.length > SET_LIMIT) {
+    return `한 번에 ${SET_LIMIT}줄까지 바꿀 수 있습니다. 나눠서 보내 주세요. 변경된 것은 없습니다.`;
+  }
+  for (const method of ['listPlans', 'editPlans', 'replayedGroup']) requireGateway(gateway, method);
+  const mutationKey = `update:${updateId}`;
+  const label = plan => `${plan.instrument.market}:${plan.instrument.ticker}`;
+  const render = (changed, unchanged = []) => {
+    const rows = [...changed].sort((a, b) => label(a).localeCompare(label(b)))
+      .map(plan => `<b>${html(label(plan))}</b> ${money(plan.dailyAmount, plan.currency)} · ` +
+        `${plan.enabled ? 'ON' : 'OFF'}`);
+    return [`✅ <b>모으기 ${changed.length}종목 변경</b>`, ...rows,
+      ...(unchanged.length ? ['', `변경 없음(이미 같은 값): ${html(unchanged.join(', '))}`] : []),
+      '', '봇의 모으기 계획만 변경했습니다. 증권사 주문은 실행하지 않습니다.'].join('\n');
+  };
+  const replayed = await gateway.replayedGroup(mutationKey);
+  if (replayed) return render(replayed);
+  const plans = await gateway.listPlans(false);
+  const errors = [];
+  const seen = new Set();
+  const work = [];
+  const unchanged = [];
+  lines.forEach((line, index) => {
+    const fail = reason => errors.push(`${index + 1}번째 줄 <code>${html(line)}</code>: ${reason}`);
+    const [name, ...rest] = line.split(/\s+/);
+    const flags = rest.filter(value => /^(ON|OFF)$/i.test(value));
+    const amounts = rest.filter(value => /^\d[\d,]*(?:원)?$/.test(value));
+    if (!rest.length || flags.length > 1 || amounts.length > 1 ||
+        flags.length + amounts.length !== rest.length ||
+        !/^[A-Za-z0-9.]+(?::[A-Za-z0-9.]+)?$/.test(name)) return fail('형식 오류');
+    const amount = amounts[0]?.replace(/[,원]/g, '');
+    if (amount !== undefined && compare(decimal(amount), decimal('0')) === 0) {
+      return fail('0원은 쓸 수 없습니다. 멈추려면 OFF를 써 주세요');
+    }
+    const [first, second] = name.toUpperCase().split(':');
+    const ticker = second ?? first;
+    const market = second ? first : null;
+    const matches = plans.filter(plan => plan.planKey && plan.instrument.ticker === ticker &&
+      (!market || plan.instrument.market === market));
+    if (!matches.length) return fail('계획을 찾지 못했습니다');
+    if (matches.length > 1) return fail('같은 종목 계획이 여러 개입니다. 한 줄 명령으로 따로 바꿔 주세요');
+    const [target] = matches;
+    if (seen.has(target.planKey)) return fail('같은 종목이 두 번 나왔습니다');
+    seen.add(target.planKey);
+    const dailyAmount = amount ?? target.dailyAmount;
+    const enabled = flags.length ? flags[0].toUpperCase() === 'ON' : target.enabled;
+    if (compare(decimal(dailyAmount), decimal(target.dailyAmount)) === 0 &&
+        enabled === target.enabled) {
+      unchanged.push(label(target));
+      return;
+    }
+    work.push({ planKey: target.planKey, expectedVersion: target.version, dailyAmount, enabled });
+  });
+  if (errors.length) {
+    return ['변경된 것은 없습니다. 아래 줄을 고쳐 전체를 다시 보내 주세요.', ...errors, '',
+      SET_USAGE].join('\n');
+  }
+  if (!work.length) return `바꿀 내용이 없습니다. 이미 같은 값입니다: ${html(unchanged.join(', '))}`;
+  mutationAllowed(signal);
+  if (delivery) delivery.mutationAttempted = true;
+  const changed = await gateway.editPlans({ changes: work, mutationKey,
+    delivery: delivery && { ...delivery, render: plans => render(plans, unchanged) } });
+  return render(changed, unchanged);
+}
+
 async function replyFor(parsed, gateway, updateId, signal, delivery) {
   const { command, raw, args } = parsed;
   if (command === 'start') return START;
@@ -277,6 +348,13 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
       currency, instrumentCurrency, targetWeightPct: weightMatch[1], memo: args.slice(3).join(' '),
       mutationKey: `update:${updateId}`, delivery: delivery && { ...delivery, render } });
     return render(plan);
+  }
+  if (command === 'recurring_set') {
+    // Several lines in one message: `/모으기설정 QQQ 4000` per line, or the command
+    // alone on the first line followed by `QQQ 4000` lines. One line keeps the old path.
+    const lines = raw.split(/\r?\n/).map(line => line.trim().replace(SET_PREFIX, '').trim())
+      .filter(Boolean);
+    if (lines.length > 1) return setPlansBatch(lines, gateway, updateId, signal, delivery);
   }
   if (command === 'recurring_set' && [2, 3].includes(args.length)) {
     // Ticker form: `/모으기설정 NVDA 3000`, `/모으기설정 NVDA OFF`, `/모으기설정 NVDA 3000 OFF`.

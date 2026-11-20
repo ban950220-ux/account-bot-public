@@ -238,3 +238,56 @@ test('plan amount and state can be changed by ticker without a plan key', async 
   assert.ok(report.indexOf('US:VOO') < report.indexOf('US:AVGO'));
   assert.match(report, /<b>US:NVDA<\/b> · 반도체\n평일 매일 2,000원 · 비중 25\.00%/);
 });
+
+test('several plans change from one multi-line message, all or nothing', async () => {
+  const { db, route } = await operating();
+  const row = ticker => db.rows('cloud_plans').find(plan => plan.ticker === ticker);
+  const revisions = () => db.rows('cloud_plan_revisions').length;
+  const before = revisions();
+  // One bad line: nothing changes and the line is named.
+  const rejected = (await route(700,
+    '/모으기설정 NVDA 3000\n/모으기설정 ZZZZ 2000\n/모으기설정 AVGO 0')).reply;
+  assert.match(rejected, /^변경된 것은 없습니다/);
+  assert.match(rejected, /2번째 줄 <code>ZZZZ 2000<\/code>: 계획을 찾지 못했습니다/);
+  assert.match(rejected, /3번째 줄 <code>AVGO 0<\/code>: 0원은 쓸 수 없습니다/);
+  assert.equal(row('NVDA').daily_amount, '4000');
+  assert.equal(revisions(), before);
+  assert.match((await route(701, '/모으기설정\nNVDA 3000\nnvda OFF')).reply,
+    /2번째 줄 .*같은 종목이 두 번/);
+  assert.match((await route(702, '/모으기설정 NVDA 3000\n/모으기설정 AVGO 2000 3000')).reply,
+    /2번째 줄 .*형식 오류/);
+  assert.equal(revisions(), before);
+  // Both layouts are accepted; VOO already matches and is reported unchanged.
+  const applied = await route(703,
+    '/모으기설정 NVDA 3,000\n/모으기설정 AVGO OFF\n/모으기설정 VOO 4000');
+  assert.equal(applied.status, 'READY');
+  assert.match(applied.reply, /모으기 2종목 변경/);
+  assert.match(applied.reply, /<b>US:AVGO<\/b> 2,000원 · OFF\n<b>US:NVDA<\/b> 3,000원 · ON/);
+  assert.match(applied.reply, /변경 없음\(이미 같은 값\): US:VOO/);
+  assert.equal(row('NVDA').daily_amount, '3000');
+  assert.equal(row('AVGO').enabled, 0);
+  assert.equal(revisions(), before + 2);
+  // The same update again replays without writing; a disabled plan can be switched back ON.
+  assert.match((await route(703, '/모으기설정 NVDA 3,000\n/모으기설정 AVGO OFF')).reply,
+    /모으기 2종목 변경/);
+  assert.equal(revisions(), before + 2);
+  assert.match((await route(704, '/모으기설정\nAVGO ON\nNVDA 3000')).reply,
+    /모으기 1종목 변경<\/b>\n<b>US:AVGO<\/b> 2,000원 · ON\n\n변경 없음\(이미 같은 값\): US:NVDA/);
+  assert.match((await route(705, '/모으기설정\nAVGO ON\nNVDA 3000')).reply, /바꿀 내용이 없습니다/);
+  assert.equal(revisions(), before + 3);
+  // A single line still uses the original reply.
+  assert.match((await route(706, '/모으기설정 NVDA 2000')).reply, /US:NVDA<\/b> 2,000원 · ON/);
+  const tooMany = Array.from({ length: 31 }, () => '/모으기설정 NVDA 2000').join('\n');
+  assert.match((await route(707, tooMany)).reply, /30줄까지/);
+});
+
+test('a multi-line edit stages its reply with the revisions in atomic delivery', async () => {
+  const { db, route } = await operating();
+  const result = await route(800, '/모으기설정 NVDA 3000\n/모으기설정 VOO OFF',
+    { atomicDelivery: true, now: () => '2026-02-02T01:00:00Z' });
+  assert.equal(result.status, 'READY');
+  assert.equal(result.mutationAttempted, true);
+  assert.equal(db.rows('cloud_outbox').length, 1);
+  assert.match(JSON.parse(db.rows('cloud_outbox')[0].payload_json).text,
+    /모으기 2종목 변경<\/b>\n<b>US:NVDA<\/b> 3,000원 · ON\n<b>US:VOO<\/b> 4,000원 · OFF/);
+});

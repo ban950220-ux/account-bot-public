@@ -165,6 +165,12 @@ keeps the policy in `cloud_policy` with append-only `cloud_policy_revisions`
 - `/추천적용 <token>` (`/recommend_apply`) recomputes the proposal and applies it
   through the existing atomic group write only if the token still matches the
   policy version, plan versions and amounts. Nothing is applied automatically.
+- `/모으기설정 <ticker> <amount|ON|OFF>` (`/recurring_set`) edits one plan by
+  ticker. Several lines in one message (each `/모으기설정 QQQ 4000`, or the
+  command alone followed by `QQQ 4000` lines, up to 30) are applied together
+  through the same atomic group write: any bad line (unknown or ambiguous
+  ticker, duplicate, format, 0) changes nothing and the reply names the line.
+  Lines that already match are reported as unchanged.
 
 Reductions resolve ticker caps, then group caps, then the budget. Spare budget
 is spent only toward owner-set group targets. If the rules cannot all be met
