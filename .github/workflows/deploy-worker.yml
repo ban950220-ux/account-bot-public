@@ -132,18 +132,23 @@ jobs:
             echo "추가 전용 migration만 허용합니다"; exit 1
           fi
           db=$(jq -r '.d1_databases[0].database_name' "$CONFIG")
-          d1() { npx wrangler d1 execute "$db" --remote --config "$CONFIG" --json --command "$1" 2>/dev/null |
-            jq -c '.[0].results'; }
+          db_id=$(jq -r '.d1_databases[0].database_id' "$CONFIG")
+          # Cloudflare API for the bookmark and read-only checks: plain JSON, no CLI banners.
+          cf() { curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'content-type: application/json' "$@"; }
+          d1() { cf -X POST --data "$(jq -cn --arg sql "$1" '{sql: $sql}')" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id/query" |
+            jq -ce 'select(.success) | .result[0].results'; }
           counts="SELECT (SELECT COUNT(*) FROM cloud_plans) AS plans,
             (SELECT COUNT(*) FROM cloud_plan_revisions) AS revisions,
             (SELECT COUNT(*) FROM cloud_outbox) AS outbox,
             (SELECT COUNT(*) FROM sqlite_master) AS objects"
-          bookmark=$(npx wrangler d1 time-travel info "$db" --config "$CONFIG" --json 2>/dev/null | jq -r '.bookmark')
-          test -n "$bookmark" && [ "$bookmark" != null ] || { echo "Time Travel 복원 지점을 얻지 못했습니다"; exit 1; }
+          bookmark=$(cf "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id/time_travel/bookmark" |
+            jq -re 'select(.success) | .result.bookmark')
           echo "복원 지점(bookmark): $bookmark"
           before=$(d1 "$counts"); echo "적용 전: $before"
           npx wrangler d1 execute "$db" --remote --config "$CONFIG" --file "$file" --yes 2>&1 |
-            sed -E "$REDACT" | grep -v -i 'proxy'
+            sed -E "$REDACT" | sed '/[Pp]roxy/d'
           after=$(d1 "$counts"); echo "적용 후: $after"
           for key in plans revisions; do
             [ "$(jq ".[0].$key" <<<"$before")" = "$(jq ".[0].$key" <<<"$after")" ] ||
