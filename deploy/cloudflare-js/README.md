@@ -177,6 +177,14 @@ keeps the policy in `cloud_policy` with append-only `cloud_policy_revisions`
   back OFF. Events live in the additive `cloud_plan_archive_events` table
   (`deploy/cloudflare/migrations/2026-11-21-plan-archive.sql`); without it the
   commands answer "not installed" and everything else is unchanged.
+- `/모으기시점 <date> [time]` (`/recurring_at`, KST; a date alone is 23:59:59)
+  previews how every live editable plan's amount and ON/OFF differ from that
+  moment; sending it again with the shown token applies the whole set through
+  the atomic group write (plans created later go OFF, archived plans are left
+  alone). The token binds the moment and every plan version, so any later edit
+  invalidates it. `/모으기이력 [ticker|plan key]` (`/recurring_history`) lists
+  recent change events, each with the `/모으기시점` command for just before it,
+  or one plan's last revisions. Both read existing revisions only.
 
 Reductions resolve ticker caps, then group caps, then the budget. Spare budget
 is spent only toward owner-set group targets. If the rules cannot all be met

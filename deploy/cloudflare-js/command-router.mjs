@@ -12,6 +12,8 @@ import { analyzeWithProvider } from './analysis-service.mjs';
 import { formatAnalysis } from './analysis-report.mjs';
 import { compare, decimal, display } from './finance.mjs';
 import { formatLegacyHistory } from './legacy-history-report.mjs';
+import { changeEvents, diffToMoment, formatKst, momentArgs, momentToken, parseKstMoment,
+  weeklyKrw } from './plan-history.mjs';
 
 const ALIASES = new Map([
   ['start', 'start'], ['help', 'help'], ['도움말', 'help'],
@@ -24,6 +26,8 @@ const ALIASES = new Map([
   ['recurring_archive', 'recurring_archive'], ['모으기삭제', 'recurring_archive'],
   ['모으기보관', 'recurring_archive'],
   ['recurring_restore', 'recurring_restore'], ['모으기복원', 'recurring_restore'],
+  ['recurring_at', 'recurring_at'], ['모으기시점', 'recurring_at'],
+  ['recurring_history', 'recurring_history'], ['모으기이력', 'recurring_history'],
   ['stock', 'stock'], ['종목', 'stock'], ['analyze', 'analyze'], ['분석', 'analyze'],
   ['thesis', 'thesis'], ['rebalance', 'rebalance'], ['리밸런싱', 'rebalance'],
   ['weekly', 'weekly'], ['주간리포트', 'weekly'],
@@ -238,6 +242,117 @@ async function archiveReply(command, args, gateway, updateId, signal, delivery) 
     expectedVersion: target.version, archived: archive, mutationKey,
     delivery: delivery && { ...delivery, render: after => render(after, archive) } });
   return render(plan, archive);
+}
+
+const MOMENT_USAGE = '사용법: <code>/모으기시점 11/20</code> · <code>/모으기시점 11/20 08:00</code>' +
+  ' · <code>/모으기시점 2026-11-20 08:00:30</code>\n시각은 KST, 날짜만 쓰면 그날 23:59:59입니다.';
+const MOMENT_PREVIEW_LIMIT = 40;
+const planLabel = plan => `${plan.instrument.market}:${plan.instrument.ticker}`;
+const stateText = (amount, currency, enabled) => `${money(amount, currency)} ${enabled ? 'ON' : 'OFF'}`;
+
+// /모으기시점: compare every live editable plan with a past moment; with the token
+// shown in the preview, put amounts and ON/OFF back as they were (later plans go OFF).
+async function momentReply(args, gateway, updateId, signal, delivery) {
+  const token = args.length && /^[0-9a-f]{8}$/.test(args[args.length - 1]) ? args.pop() : null;
+  if (!args.length || args.length > 2) return MOMENT_USAGE;
+  const moment = parseKstMoment(args[0], args[1] ?? null, new Date());
+  if (!moment) return MOMENT_USAGE;
+  if (moment.at > new Date()) return '미래 시점은 쓸 수 없습니다.';
+  for (const method of ['planHistory', 'editPlans', 'replayedGroup']) requireGateway(gateway, method);
+  const mutationKey = `update:${updateId}`;
+  const render = changed => {
+    const names = [...changed].sort((a, b) => planLabel(a).localeCompare(planLabel(b)))
+      .map(plan => `${plan.instrument.ticker} ${money(plan.dailyAmount, plan.currency)} ` +
+        `${plan.enabled ? 'ON' : 'OFF'}`);
+    return [`↩️ <b>${html(moment.label)} 시점으로 ${changed.length}종목 되돌림</b>`,
+      html(names.slice(0, 30).join(' · ')) + (names.length > 30 ? ` 외 ${names.length - 30}개` : ''),
+      '', '이 변경도 이력에 남으므로 <code>/모으기이력</code>에서 다시 되돌릴 수 있습니다.',
+      '봇의 모으기 계획만 변경했습니다. 증권사 주문은 실행하지 않습니다.'].join('\n');
+  };
+  if (token) {
+    const replayed = await gateway.replayedGroup(mutationKey);
+    if (replayed) return render(replayed);
+  }
+  const { plans, revisions } = await gateway.planHistory();
+  const live = plans.filter(plan => !plan.archived);
+  const changes = diffToMoment(live, revisions, moment.at);
+  if (!changes.length) return `${html(moment.label)} 시점과 지금 모으기 계획이 같습니다. 바꿀 것이 없습니다.`;
+  const expected = await momentToken(moment.at, changes);
+  if (token && token !== expected) {
+    return '확인 번호가 지금 계산과 맞지 않습니다. 그 사이 계획이 바뀌었을 수 있으니 ' +
+      `<code>/모으기시점 ${html(args.join(' '))}</code>로 다시 확인해 주세요. 변경된 것은 없습니다.`;
+  }
+  if (!token) {
+    const before = weeklyKrw(live.map(plan => ({ amount: plan.dailyAmount, enabled: plan.enabled, plan })));
+    const afterTargets = new Map(changes.map(change => [change.plan.planKey, change.target]));
+    const after = weeklyKrw(live.map(plan => {
+      const target = afterTargets.get(plan.planKey);
+      return { amount: target?.dailyAmount ?? plan.dailyAmount,
+        enabled: target?.enabled ?? plan.enabled, plan };
+    }));
+    const rows = changes.slice(0, MOMENT_PREVIEW_LIMIT).map(change =>
+      `<b>${html(change.plan.instrument.ticker)}</b> ` +
+      `${stateText(change.plan.dailyAmount, change.plan.currency, change.plan.enabled)} → ` +
+      (change.existed ? stateText(change.target.dailyAmount, change.plan.currency,
+        change.target.enabled) : '(그때 없던 계획) OFF'));
+    return [`🕘 <b>${html(moment.label)} 시점과 비교</b> (다른 계획 ${changes.length}개)`, ...rows,
+      ...(changes.length > MOMENT_PREVIEW_LIMIT ?
+        [`… 외 ${changes.length - MOMENT_PREVIEW_LIMIT}개`] : []),
+      '', `주간 합계 ${money(before.total, 'KRW')} → ${money(after.total, 'KRW')}` +
+        (before.other || after.other ? ' (원화 계획만)' : ''),
+      '보관한 계획은 대상에서 빠집니다. 금액과 ON/OFF만 바뀝니다.',
+      `반영: <code>/모으기시점 ${html(momentArgs(moment.at))} ${expected}</code>`].join('\n');
+  }
+  mutationAllowed(signal);
+  if (delivery) delivery.mutationAttempted = true;
+  const changed = await gateway.editPlans({ changes: changes.map(change => ({
+    planKey: change.plan.planKey, expectedVersion: change.plan.version,
+    dailyAmount: change.target.dailyAmount, enabled: change.target.enabled })),
+  mutationKey, delivery: delivery && { ...delivery, render } });
+  return render(changed);
+}
+
+// /모으기이력: recent change events with a way back to just before each one,
+// or the last revisions of one plan.
+async function historyReply(args, gateway) {
+  if (args.length > 1 || (args[0] && !/^[A-Za-z0-9._-]+(?::[A-Za-z0-9._-]+)*$/.test(args[0]))) {
+    return '사용법: <code>/모으기이력</code> · <code>/모으기이력 ROK</code> · <code>/모으기이력 계획키</code>';
+  }
+  requireGateway(gateway, 'planHistory');
+  const { plans, revisions } = await gateway.planHistory();
+  const byKey = new Map(plans.map(plan => [plan.planKey, plan]));
+  if (!args.length) {
+    const events = changeEvents(revisions, 15);
+    if (!events.length) return '모으기 계획 변경 이력이 없습니다.';
+    const lines = ['🗂 <b>최근 모으기 변경</b> (최신순)'];
+    for (const event of events) {
+      const tickers = [...new Set(event.members.map(row => row.ticker))];
+      lines.push('', `<b>${formatKst(event.at)}</b> · ${event.members.length}종목 · ` +
+        html(tickers.slice(0, 4).join(', ')) + (tickers.length > 4 ? ` 외 ${tickers.length - 4}` : ''),
+      `이 변경 직전으로: <code>/모으기시점 ${momentArgs(new Date(event.at.getTime() - 1000))}</code>`);
+    }
+    return lines.join('\n');
+  }
+  const name = args[0];
+  let targets = plans.filter(plan => plan.planKey === name);
+  if (!targets.length) {
+    const parts = name.toUpperCase().split(':');
+    const [ticker, market] = parts.length === 2 ? [parts[1], parts[0]] : [parts[0], null];
+    targets = parts.length > 2 ? [] : plans.filter(plan => !plan.archived &&
+      plan.instrument.ticker === ticker && (!market || plan.instrument.market === market));
+  }
+  if (!targets.length) return `${html(name)} 계획을 찾지 못했습니다.`;
+  if (targets.length > 1) {
+    return '같은 종목의 계획이 여러 개입니다. 아래 중 하나를 보내 주세요.\n' +
+      targets.map(plan => `<code>/모으기이력 ${html(plan.planKey)}</code>`).join('\n');
+  }
+  const [plan] = targets;
+  const rows = revisions.filter(row => row.planKey === plan.planKey)
+    .sort((a, b) => b.revisionNo - a.revisionNo).slice(0, 10);
+  return [`🗂 <b>${html(planLabel(byKey.get(plan.planKey)))}</b> 최근 변경` +
+    (plan.archived ? ' (보관됨)' : ''), `<code>${html(plan.planKey)}</code>`, '',
+  ...rows.map(row => `${formatKst(new Date(Date.parse(row.effectiveFrom)))} · ` +
+    stateText(row.dailyAmount, row.currency, row.enabled))].join('\n');
 }
 
 async function replyFor(parsed, gateway, updateId, signal, delivery) {
@@ -464,6 +579,8 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
       mutationKey: `update:${updateId}`, delivery: delivery && { ...delivery, render } });
     return render(plan);
   }
+  if (command === 'recurring_at') return momentReply([...args], gateway, updateId, signal, delivery);
+  if (command === 'recurring_history') return historyReply(args, gateway);
   if (command === 'recurring_archive' || command === 'recurring_restore') {
     return archiveReply(command, args, gateway, updateId, signal, delivery);
   }

@@ -3,7 +3,8 @@ import { add, compare, decimal, divide28, exact, multiply } from './finance.mjs'
 import { refreshWithProviders } from './provider-contracts.mjs';
 import { analyzeWithProvider } from './analysis-service.mjs';
 import { appendThesis, applyGroupChanges, applyPlanChange, createPlanOnce,
-  currentThesis, groupMutationPlans, listCurrentPlans, archiveEvent, planArchiveInstalled,
+  currentThesis, groupMutationPlans, listCurrentPlans, listPlanRevisions, archiveEvent,
+  planArchiveInstalled,
   setPlanArchived } from './cloud-write.mjs';
 import { enqueueUpdate } from './outbox.mjs';
 import { currentPolicy, savePolicy } from './policy-store.mjs';
@@ -262,6 +263,17 @@ export class SyntheticCloudGateway {
   }
 
   planArchiveInstalled() { return planArchiveInstalled(this.db); }
+
+  // Editable plans (archived flagged) and their revisions, for history and
+  // point-in-time views. Nothing outside the owner's editable scope is returned.
+  async planHistory() {
+    const editable = await this.editableFilter();
+    const plans = (await listCurrentPlans(this.db, false, { includeArchived: true }))
+      .filter(editable);
+    const keys = new Set(plans.map(plan => plan.planKey));
+    const revisions = (await listPlanRevisions(this.db)).filter(row => keys.has(row.planKey));
+    return { plans: plans.map(plan => ({ ...toDomain(plan), archived: plan.archived })), revisions };
+  }
 
   // Editable local plans for /모으기삭제 (archived=false) or /모으기복원 (archived=true):
   // an exact plan key wins, otherwise `TICKER` or `MARKET:TICKER`.

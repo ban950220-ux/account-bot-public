@@ -91,6 +91,17 @@ export async function listCurrentPlans(db, enabledOnly = false,
     ...(includeArchived ? { archived: row.archive_action === 'ARCHIVE' } : {}) }));
 }
 
+// Revisions for history and point-in-time views, oldest first, bounded.
+export async function listPlanRevisions(db, limit = 5000) {
+  const { results } = await db.prepare(`SELECT plan_key, revision_no, market, ticker,
+    enabled, daily_amount, amount_currency, effective_from FROM cloud_plan_revisions
+    ORDER BY effective_from, plan_key, revision_no LIMIT ?`).bind(limit).all();
+  return results.map(row => ({ planKey: row.plan_key, revisionNo: row.revision_no,
+    market: row.market, ticker: row.ticker, enabled: row.enabled === 1,
+    dailyAmount: row.daily_amount, currency: row.amount_currency,
+    effectiveFrom: row.effective_from }));
+}
+
 export async function planArchiveInstalled(db) {
   try {
     await db.prepare('SELECT 1 FROM cloud_plan_archive_events LIMIT 1').first();
