@@ -92,9 +92,18 @@ jobs:
           # D1 access (read-only): migrate needs a Time Travel bookmark and queries.
           db_id=$(jq -r '.d1_databases[0].database_id' "$CONFIG")
           d1url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id"
-          if curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$d1url/time_travel/bookmark" |
-              jq -e '.success' >/dev/null; then echo "D1 권한: 있음"
-          else echo "D1 권한: 없음 (migrate 불가, 토큰에 Account · D1 · Edit 필요)"; fi
+          d1probe() {
+            local out code
+            out=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$d1url$1")
+            code=$(tail -n1 <<<"$out")
+            echo "D1 $2: HTTP $code $(head -n -1 <<<"$out" |
+              jq -c '{success, errors: [.errors[]? | {code, message}]}' 2>/dev/null)"
+          }
+          d1probe "" "데이터베이스 정보"
+          d1probe "/time_travel/bookmark" "복원 지점"
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" |
+            jq -c '{토큰: .result.status, 만료: .result.expires_on}'
 
       - name: Upload and deploy
         if: inputs.action == 'deploy'
