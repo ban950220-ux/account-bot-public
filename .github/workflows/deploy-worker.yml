@@ -103,7 +103,7 @@ jobs:
           d1probe "/time_travel/bookmark" "복원 지점"
           curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/user/tokens/verify" |
-            jq -c '{토큰: .result.status, 만료: .result.expires_on}'
+            jq -c '{"토큰": .result.status, "만료": .result.expires_on}'
 
       - name: Upload and deploy
         if: inputs.action == 'deploy'
