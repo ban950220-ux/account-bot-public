@@ -1,6 +1,6 @@
 # 모으기 계획 보관(삭제) — 설계
 
-상태: 1단계 완료, 2단계(운영 DB 적용) 승인 대기 · 작성 2026-11-21
+상태: 2단계 완료, 3단계(코드 배포) 승인 대기 · 작성 2026-11-21
 
 ## 배경
 
@@ -113,3 +113,21 @@ CREATE TABLE IF NOT EXISTS cloud_plan_archive_events (
   - JS 166개 통과, Python 233개 통과·1개 건너뜀, ruff 통과, 이관 점검 통과
   - 번들 생성 성공(297.14 KiB)
   - migration을 두 번 실행해도 오류 없음(`IF NOT EXISTS`)
+
+### 2단계 (2026-11-21)
+
+- `migrate` 동작을 추가했다(`.github/workflows/deploy-worker.yml`).
+  - 허용하는 것: CREATE 문, 그리고 중단(RAISE)만 하는 trigger 본문
+  - 순서: 복원 지점 기록 → 적용 → 계획·이력 행 수와 생성 객체 확인
+  - 로그에는 행 수, 객체 이름, 복원 지점만 남는다.
+- 실패한 시도 (운영 DB 변경 없음: 두 번 다 SQL 실행 전 단계에서 멈춤)
+  - run #6: wrangler가 JSON 앞에 다른 문구를 출력해 복원 지점을 읽지 못했다. 복원 지점과 확인 조회를 D1 REST API로 바꿨다.
+  - run #7: API가 401을 돌려줬다. GitHub에 들어 있던 토큰은 만료일 없는 다른 토큰이었고, D1 권한이 없었다.
+  - 조치: `check`가 D1 접근 여부와 Cloudflare 오류 코드, 토큰 만료일을 보여주도록 고쳤다. 사용자가 D1·Workers 권한이 있는 `accounbt_bot` 토큰을 Roll해서 GitHub `production`에 다시 넣었다.
+  - run #11 `check`: D1 정보·복원 지점 모두 HTTP 200
+- run #12 `migrate` 성공
+  - 복원 지점: `0000005a-00000000-0000512a-8fd3620607aca76ddd5a84318e2a363d`
+  - 적용 전: 계획 85, 이력 263, outbox 109, 객체 129
+  - 적용 후: 계획 85, 이력 263, outbox 109, 객체 135 (+6: 테이블, UNIQUE 자동 인덱스, 인덱스, trigger 3)
+  - 5개 이름 모두 생성 확인: `cloud_plan_archive_events`, `cloud_plan_archive_events_plan`, `fence_cloud_plan_archive_insert`, `plan_archive_immutable_update`, `plan_archive_immutable_delete`
+  - **2단계 완료.** 운영 Worker는 아직 `d7806194`라 새 테이블을 쓰지 않는다.
