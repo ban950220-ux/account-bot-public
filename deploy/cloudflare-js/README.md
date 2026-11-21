@@ -171,6 +171,12 @@ keeps the policy in `cloud_policy` with append-only `cloud_policy_revisions`
   through the same atomic group write: any bad line (unknown or ambiguous
   ticker, duplicate, format, 0) changes nothing and the reply names the line.
   Lines that already match are reported as unchanged.
+- `/모으기삭제 <ticker|plan key>` (`/recurring_archive`, alias `/모으기보관`) archives a
+  plan: it is turned OFF and hidden from listings, totals, reports and ticker
+  lookup; rows and revisions stay. `/모으기복원` (`/recurring_restore`) brings it
+  back OFF. Events live in the additive `cloud_plan_archive_events` table
+  (`deploy/cloudflare/migrations/2026-11-21-plan-archive.sql`); without it the
+  commands answer "not installed" and everything else is unchanged.
 
 Reductions resolve ticker caps, then group caps, then the budget. Spare budget
 is spent only toward owner-set group targets. If the rules cannot all be met

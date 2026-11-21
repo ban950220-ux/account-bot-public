@@ -1,6 +1,6 @@
 # 모으기 계획 보관(삭제) — 설계
 
-상태: 설계 확인 대기 · 작성 2026-11-21
+상태: 1단계 완료, 2단계(운영 DB 적용) 승인 대기 · 작성 2026-11-21
 
 ## 배경
 
@@ -83,3 +83,33 @@ CREATE TABLE IF NOT EXISTS cloud_plan_archive_events (
 ## 남은 이슈
 
 - Windows 로컬 봇으로 되돌리는 점검 스크립트(`scripts/cloud/rollback_reconcile.py`)는 새 테이블을 모른다. 되돌리면 보관했던 계획이 OFF 상태로 다시 보인다. 합계에는 영향이 없다.
+
+## 단계별 기록
+
+### 1단계 (2026-11-21)
+
+- 추가
+  - `deploy/cloudflare/migrations/2026-11-21-plan-archive.sql`. 같은 내용을 `schema.sql` 끝에도 넣었다.
+  - `listCurrentPlans`의 보관 제외와 `includeArchived` 옵션, `setPlanArchived`, `archiveEvent`, `planArchiveInstalled`
+  - gateway `archiveTargets`, `replayedArchive`, `setArchived`
+  - 명령 `/모으기삭제`(`/모으기보관`, `/recurring_archive`)와 `/모으기복원`(`/recurring_restore`)
+  - outbox 증거 종류 `archive`
+- 결정
+  - 보관된 계획과 같은 종목으로 `/모으기추가`를 하면 오류로 막는다. 보관된 계획이 몰래 되살아나거나, 같은 종목이 새로 생겨 다시 중복되는 것을 막기 위해서다.
+- 테스트 `tests/cloud_js_plan_archive.test.mjs` 6개
+  - 중복 ROK 처리
+  - 보관하면 OFF와 이벤트가 함께 기록되고 행·이력이 남는다
+  - 목록, `/모으기`, 한 줄·여러 줄 설정에서 빠진다
+  - 같은 메시지를 다시 보내도 한 번만 반영된다
+  - 복원하면 OFF로 돌아오고, 이미 OFF면 계획 개정 없이 이벤트만 쌓인다
+  - 입력 검증, 보관된 계획을 계획키로 수정하면 거부된다
+  - 테이블이 없을 때 기존 동작 그대로다
+  - fence가 닫히면 쓰기가 거부되고, 이벤트 수정·삭제가 거부된다
+  - 원자적 전송 시 응답이 함께 기록된다
+- 처음 실행에서 실패한 것
+  - 테스트 fixture 두 가지: 중복 ROK의 출처 memo를 운영과 다르게 만들어 목록에서 하나로 합쳐졌고, 테스트 DB 헬퍼가 새 테이블을 읽지 못했다.
+  - 코드 문제 하나: 테이블이 없을 때 재전송 확인이 먼저 실행돼 오류가 났다. `archiveEvent`가 "테이블 없음"을 "기록 없음"으로 보도록 고쳤다.
+- 결과
+  - JS 166개 통과, Python 233개 통과·1개 건너뜀, ruff 통과, 이관 점검 통과
+  - 번들 생성 성공(297.14 KiB)
+  - migration을 두 번 실행해도 오류 없음(`IF NOT EXISTS`)

@@ -24,6 +24,7 @@ export function mutationDeliveryStatements(db, delivery, evidence) {
     group: [`cloud_mutation_checks`, `mutation_key = ?`],
     thesis: [`cloud_thesis_revisions`, `instrument_key = ? AND mutation_key = ?`],
     policy: [`cloud_policy_revisions`, `mutation_key = ?`],
+    archive: [`cloud_plan_archive_events`, `mutation_key = ?`],
   };
   const selected = selectors[evidence?.kind];
   if (!selected || !Array.isArray(evidence.values)) throw new TypeError('invalid mutation evidence');

@@ -21,6 +21,9 @@ const ALIASES = new Map([
   ['recurring_add', 'recurring_add'], ['모으기추가', 'recurring_add'],
   ['recurring_set', 'recurring_set'], ['모으기설정', 'recurring_set'],
   ['recurring_update', 'recurring_update'], ['모으기변경', 'recurring_update'],
+  ['recurring_archive', 'recurring_archive'], ['모으기삭제', 'recurring_archive'],
+  ['모으기보관', 'recurring_archive'],
+  ['recurring_restore', 'recurring_restore'], ['모으기복원', 'recurring_restore'],
   ['stock', 'stock'], ['종목', 'stock'], ['analyze', 'analyze'], ['분석', 'analyze'],
   ['thesis', 'thesis'], ['rebalance', 'rebalance'], ['리밸런싱', 'rebalance'],
   ['weekly', 'weekly'], ['주간리포트', 'weekly'],
@@ -184,6 +187,57 @@ async function setPlansBatch(lines, gateway, updateId, signal, delivery) {
   const changed = await gateway.editPlans({ changes: work, mutationKey,
     delivery: delivery && { ...delivery, render: plans => render(plans, unchanged) } });
   return render(changed, unchanged);
+}
+
+const ARCHIVE_NOTE = '봇의 모으기 계획만 변경했습니다. 증권사 주문은 실행하지 않습니다.';
+
+// /모으기삭제 hides a plan (turning it OFF); /모으기복원 brings it back OFF.
+// Rows and revisions are kept, so either can be undone.
+async function archiveReply(command, args, gateway, updateId, signal, delivery) {
+  const archive = command === 'recurring_archive';
+  const verb = archive ? '모으기삭제' : '모으기복원';
+  if (args.length !== 1 || !/^[A-Za-z0-9._-]+(?::[A-Za-z0-9._-]+)*$/.test(args[0]) ||
+      args[0].length > 128) {
+    return `사용법: <code>/${verb} ROK</code> · <code>/${verb} 계획키</code>\n` +
+      '삭제는 목록·합계·보고서에서 빼는 보관이며, <code>/모으기복원</code>으로 되살릴 수 있습니다.';
+  }
+  for (const method of ['planArchiveInstalled', 'archiveTargets', 'replayedArchive', 'setArchived']) {
+    requireGateway(gateway, method);
+  }
+  const mutationKey = `update:${updateId}`;
+  const label = plan => `${plan.instrument.market}:${plan.instrument.ticker}`;
+  const render = (plan, archived) => archived ?
+    `🗄 <b>${html(label(plan))}</b> 계획을 삭제(보관)했습니다.\n` +
+      `<code>${html(plan.planKey)}</code> · ${money(plan.dailyAmount, plan.currency)} · OFF\n` +
+      '목록·합계·보고서·종목 찾기에서 빠집니다. 변경 이력은 남습니다.\n' +
+      `되살리기: <code>/모으기복원 ${html(plan.planKey)}</code>\n${ARCHIVE_NOTE}` :
+    `♻️ <b>${html(label(plan))}</b> 계획을 복원했습니다.\n` +
+      `<code>${html(plan.planKey)}</code> · ${money(plan.dailyAmount, plan.currency)} · ` +
+      `${plan.enabled ? 'ON' : 'OFF'}\n` +
+      (plan.enabled ? '' : `다시 모으려면: <code>/모으기설정 ${html(plan.planKey)} ` +
+        `${plan.dailyAmount} ${plan.currency} ON ${plan.version}</code>\n`) + ARCHIVE_NOTE;
+  const replayed = await gateway.replayedArchive(mutationKey);
+  if (replayed) return render(replayed.plan, replayed.archived);
+  if (!await gateway.planArchiveInstalled()) {
+    return '삭제(보관) 기능이 아직 운영 DB에 설치되지 않았습니다. 변경된 것은 없습니다.';
+  }
+  const targets = await gateway.archiveTargets(args[0], !archive);
+  if (!targets.length) {
+    return archive ? `${html(args[0])} 계획을 찾지 못했습니다. 이미 삭제(보관)했을 수 있습니다.` :
+      `보관된 ${html(args[0])} 계획이 없습니다.`;
+  }
+  if (targets.length > 1) {
+    return '같은 종목의 계획이 여러 개입니다. 변경된 것은 없습니다. 아래 중 하나를 보내 주세요.\n' +
+      targets.map(plan => `<code>/${verb} ${html(plan.planKey)}</code> · ` +
+        `${money(plan.dailyAmount, plan.currency)} · ${plan.enabled ? 'ON' : 'OFF'}`).join('\n');
+  }
+  const [target] = targets;
+  mutationAllowed(signal);
+  if (delivery) delivery.mutationAttempted = true;
+  const plan = await gateway.setArchived({ planKey: target.planKey,
+    expectedVersion: target.version, archived: archive, mutationKey,
+    delivery: delivery && { ...delivery, render: after => render(after, archive) } });
+  return render(plan, archive);
 }
 
 async function replyFor(parsed, gateway, updateId, signal, delivery) {
@@ -409,6 +463,9 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
       enabled: args[3].toUpperCase() === 'ON', expectedVersion: Number(args[4]),
       mutationKey: `update:${updateId}`, delivery: delivery && { ...delivery, render } });
     return render(plan);
+  }
+  if (command === 'recurring_archive' || command === 'recurring_restore') {
+    return archiveReply(command, args, gateway, updateId, signal, delivery);
   }
   if (command === 'recurring_update') {
     if (args.length < 2) return USAGE_UPDATE;

@@ -3,7 +3,8 @@ import { add, compare, decimal, divide28, exact, multiply } from './finance.mjs'
 import { refreshWithProviders } from './provider-contracts.mjs';
 import { analyzeWithProvider } from './analysis-service.mjs';
 import { appendThesis, applyGroupChanges, applyPlanChange, createPlanOnce,
-  currentThesis, groupMutationPlans, listCurrentPlans } from './cloud-write.mjs';
+  currentThesis, groupMutationPlans, listCurrentPlans, archiveEvent, planArchiveInstalled,
+  setPlanArchived } from './cloud-write.mjs';
 import { enqueueUpdate } from './outbox.mjs';
 import { currentPolicy, savePolicy } from './policy-store.mjs';
 import { recordTransactionOnce } from './storage.mjs';
@@ -100,7 +101,11 @@ export class SyntheticCloudGateway {
   async createPlan({ market, ticker, amount, currency, instrumentCurrency = null, targetWeightPct, memo,
     mutationKey, delivery = null }) {
     let planKey = `manual:${market}:${ticker}`;
-    const plans = await listCurrentPlans(this.db);
+    const plans = await listCurrentPlans(this.db, false, { includeArchived: true });
+    if (plans.some(plan => plan.archived && (plan.planKey === planKey ||
+        match(plan.instrument, market, ticker)))) {
+      throw new TypeError('archived plan must be restored before it is edited');
+    }
     let existing = plans.find(row => row.planKey === planKey);
     if (!existing) {
       const aliases = [];
@@ -254,6 +259,48 @@ export class SyntheticCloudGateway {
     const keys = new Set(work.map(item => item.planKey));
     return (await listCurrentPlans(this.db)).filter(plan => keys.has(plan.planKey))
       .map(toDomain);
+  }
+
+  planArchiveInstalled() { return planArchiveInstalled(this.db); }
+
+  // Editable local plans for /모으기삭제 (archived=false) or /모으기복원 (archived=true):
+  // an exact plan key wins, otherwise `TICKER` or `MARKET:TICKER`.
+  async archiveTargets(name, archived) {
+    const editable = await this.editableFilter();
+    const plans = (await listCurrentPlans(this.db, false, { includeArchived: true }))
+      .filter(plan => editable(plan) && plan.archived === archived);
+    const exact = plans.filter(plan => plan.planKey === name);
+    if (exact.length) return exact.map(toDomain);
+    const parts = name.toUpperCase().split(':');
+    if (parts.length > 2) return [];
+    const [ticker, market] = parts.length === 2 ? [parts[1], parts[0]] : [parts[0], null];
+    return plans.filter(plan => plan.instrument.ticker === ticker &&
+      (!market || plan.instrument.market === market)).map(toDomain);
+  }
+
+  // The plan an archive mutation already changed, with its action, or null.
+  async replayedArchive(mutationKey) {
+    const event = await archiveEvent(this.db, mutationKey);
+    if (!event) return null;
+    const plan = (await listCurrentPlans(this.db, false, { includeArchived: true }))
+      .find(row => row.planKey === event.plan_key);
+    return plan ? { plan: toDomain(plan), archived: event.action === 'ARCHIVE' } : null;
+  }
+
+  async setArchived({ planKey, expectedVersion, archived, mutationKey, delivery = null }) {
+    const editable = await this.editableFilter();
+    const plan = (await listCurrentPlans(this.db, false, { includeArchived: true }))
+      .find(row => row.planKey === planKey);
+    if (!plan || !editable(plan) || plan.version !== expectedVersion) {
+      throw new TypeError('stale or foreign plan archive');
+    }
+    const after = toDomain({ ...plan, enabled: archived ? false : plan.enabled });
+    const staged = delivery && { ...delivery, reply: delivery.render(after) };
+    const outcome = await setPlanArchived(this.db, { planKey, expectedVersion, archived,
+      mutationKey, effectiveAt: this.now(), delivery: staged });
+    if (!['CHANGED', 'REPLAY'].includes(outcome)) throw new Error('plan archive conflict');
+    return toDomain((await listCurrentPlans(this.db, false, { includeArchived: true }))
+      .find(row => row.planKey === planKey));
   }
 
   async changeGroup({ assetType, delta, stop, excluded, mutationKey, delivery = null }) {

@@ -60,16 +60,113 @@ function statePayload(state) {
     state.enabled, state.timezoneName, state.startedAt, state.memo]);
 }
 
-export async function listCurrentPlans(db, enabledOnly = false, { withThesis = false } = {}) {
+const LATEST_ARCHIVE = `(SELECT e.action FROM cloud_plan_archive_events AS e
+  WHERE e.plan_key = p.plan_key ORDER BY e.event_no DESC LIMIT 1)`;
+const NO_ARCHIVE_TABLE = /no such table: cloud_plan_archive_events/i;
+
+// Archived plans are hidden unless `includeArchived`; each row then carries
+// `archived`. Before the additive archive table exists nothing is archived.
+export async function listCurrentPlans(db, enabledOnly = false,
+  { withThesis = false, includeArchived = false } = {}) {
   // The exact listing key and current revision are the same selectors as currentThesis.
-  const query = `SELECT p.*${withThesis ? ', r.thesis_text' : ''} FROM cloud_plans AS p
+  const query = archive => {
+    const where = [...(enabledOnly ? ['p.enabled = 1'] : []),
+      ...(archive && !includeArchived ? [`${LATEST_ARCHIVE} IS NOT 'ARCHIVE'`] : [])];
+    return `SELECT p.*${withThesis ? ', r.thesis_text' : ''}${archive ?
+      `, ${LATEST_ARCHIVE} AS archive_action` : ''} FROM cloud_plans AS p
     ${withThesis ? `LEFT JOIN cloud_theses AS t ON t.instrument_key = p.market || ':' || p.ticker
       LEFT JOIN cloud_thesis_revisions AS r ON r.instrument_key = t.instrument_key
         AND r.revision_no = t.current_revision_no` : ''}
-    ${enabledOnly ? 'WHERE p.enabled = 1' : ''} ORDER BY p.plan_key`;
-  const { results } = await db.prepare(query).all();
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY p.plan_key`;
+  };
+  let results;
+  try {
+    ({ results } = await db.prepare(query(true)).all());
+  } catch (error) {
+    if (!NO_ARCHIVE_TABLE.test(String(error?.message))) throw error;
+    ({ results } = await db.prepare(query(false)).all());
+  }
   return results.map(row => ({ planKey: row.plan_key, version: row.version,
-    ...fromRow(row), ...(withThesis ? { investmentThesis: row.thesis_text || '' } : {}) }));
+    ...fromRow(row), ...(withThesis ? { investmentThesis: row.thesis_text || '' } : {}),
+    ...(includeArchived ? { archived: row.archive_action === 'ARCHIVE' } : {}) }));
+}
+
+export async function planArchiveInstalled(db) {
+  try {
+    await db.prepare('SELECT 1 FROM cloud_plan_archive_events LIMIT 1').first();
+    return true;
+  } catch (error) {
+    if (NO_ARCHIVE_TABLE.test(String(error?.message))) return false;
+    throw error;
+  }
+}
+
+// The plan and action an archive mutation already recorded, or null.
+export async function archiveEvent(db, mutationKey) {
+  if (!MUTATION.test(mutationKey)) throw new TypeError('invalid archive mutation key');
+  try {
+    return await db.prepare(`SELECT plan_key, action FROM cloud_plan_archive_events
+      WHERE mutation_key = ?`).bind(mutationKey).first() ?? null;
+  } catch (error) {
+    if (NO_ARCHIVE_TABLE.test(String(error?.message))) return null;
+    throw error;
+  }
+}
+
+// ARCHIVE turns the plan OFF (one revision) and records the event in the same
+// batch; RESTORE only records the event, so a restored plan comes back OFF.
+// The event insert is conditioned on the final plan version, so a lost race
+// writes neither. Returns CHANGED, UNCHANGED, REPLAY, MISSING or CONFLICT.
+export async function setPlanArchived(db, { planKey, expectedVersion, archived, mutationKey,
+  effectiveAt, delivery = null }) {
+  if (!MUTATION.test(required(planKey, 'planKey')) || !MUTATION.test(mutationKey) ||
+      !Number.isSafeInteger(expectedVersion) || expectedVersion < 1 ||
+      typeof archived !== 'boolean') {
+    throw new TypeError('invalid plan archive mutation');
+  }
+  required(effectiveAt, 'effectiveAt');
+  if (await archiveEvent(db, mutationKey)) return 'REPLAY';
+  const current = await db.prepare(`SELECT p.*, ${LATEST_ARCHIVE} AS archive_action
+    FROM cloud_plans AS p WHERE p.plan_key = ?`).bind(planKey).first();
+  if (!current) return 'MISSING';
+  if (current.version !== expectedVersion) return 'CONFLICT';
+  if ((current.archive_action === 'ARCHIVE') === archived) return 'UNCHANGED';
+  const turnOff = archived && current.enabled === 1;
+  const finalVersion = expectedVersion + (turnOff ? 1 : 0);
+  const statements = [];
+  const deliveryStatements = mutationDeliveryStatements(db, delivery,
+    { kind: 'archive', values: [mutationKey] });
+  if (delivery) statements.push(deliveryStatements[0]);
+  if (turnOff) {
+    const state = normalizeState({ ...fromRow(current), enabled: false });
+    const changeHash = await hash(statePayload(state));
+    statements.push(db.prepare(`UPDATE cloud_plans SET enabled = 0,
+      version = version + 1, last_mutation_key = ?
+      WHERE plan_key = ? AND version = ? AND NOT EXISTS (
+        SELECT 1 FROM cloud_plan_revisions WHERE plan_key = ? AND mutation_key = ?
+      )`).bind(mutationKey, planKey, expectedVersion, planKey, mutationKey));
+    statements.push(db.prepare(`INSERT INTO cloud_plan_revisions
+      (plan_key, revision_no, change_hash, source, account_fingerprint,
+       market, ticker, asset_type, instrument_currency, enabled, daily_amount,
+       amount_currency, target_weight, timezone_name, started_at, effective_from,
+       memo, mutation_key)
+      SELECT plan_key, version, ?, source, account_fingerprint, market, ticker,
+       asset_type, instrument_currency, enabled, daily_amount, amount_currency,
+       target_weight, timezone_name, started_at, ?, memo, ? FROM cloud_plans
+      WHERE plan_key = ? AND version = ? AND last_mutation_key = ?`)
+      .bind(changeHash, effectiveAt, mutationKey, planKey, finalVersion, mutationKey));
+  }
+  statements.push(db.prepare(`INSERT INTO cloud_plan_archive_events
+    (plan_key, action, effective_at, mutation_key)
+    SELECT plan_key, ?, ?, ? FROM cloud_plans WHERE plan_key = ? AND version = ?`)
+    .bind(archived ? 'ARCHIVE' : 'RESTORE', effectiveAt, mutationKey, planKey, finalVersion));
+  if (delivery) statements.push(deliveryStatements[1]);
+  const results = await db.batch(statements);
+  const offset = delivery ? 1 : 0;
+  const written = results.slice(offset, offset + (turnOff ? 3 : 1)).map(resultChanges);
+  if (written.every(count => count === 0)) return 'CONFLICT';
+  if (written.some(count => count !== 1)) throw new Error('plan archive transaction mismatch');
+  return 'CHANGED';
 }
 
 export async function createPlanOnce(db, planKey, mutationKey, initialState, effectiveAt,
