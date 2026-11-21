@@ -1,6 +1,6 @@
 # 모으기 계획 보관(삭제) — 설계
 
-상태: 3단계 완료, 4단계(실사용 확인) 대기 · 작성 2026-11-21
+상태: 완료 · 작성 2026-11-21
 
 ## 배경
 
@@ -137,3 +137,7 @@ CREATE TABLE IF NOT EXISTS cloud_plan_archive_events (
 - Actions `deploy` run #13 (master `cae3ca3`): Worker 테스트 통과, 새 버전 `b403a75e-62b7-4bee-935d-fe0d7168193d` 운영 100%, webhook 무인증 POST 403.
 - 되돌릴 직전 버전: `d7806194-1380-4d35-86cf-6558a91bcf27`
 - **3단계 완료.** 남은 것: 4단계 실사용 확인(`/모으기삭제 user-candidate:US:ROK` 다음에 `/모으기설정 ROK OFF`)
+
+### 4단계 (2026-11-21)
+
+- 사용자가 운영 텔레그램에서 `/모으기삭제 user-candidate:US:ROK`, `/모으기설정 ROK OFF`가 정상 동작하는 것을 확인했다. **완료.**
