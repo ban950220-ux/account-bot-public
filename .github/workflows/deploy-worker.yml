@@ -8,7 +8,7 @@ on:
       action:
         description: "check: read-only status · deploy: test, upload and deploy master · rollback: redeploy version_id · migrate: apply one additive D1 migration"
         type: choice
-        options: [check, deploy, rollback, migrate]
+        options: [check, deploy, rollback, migrate, metrics]
         default: check
         required: true
       version_id:
@@ -131,6 +131,29 @@ jobs:
           echo "되돌리기 전 버전: $(cat previous.txt)"
           npx wrangler versions deploy "$VERSION_ID@100%" --config "$CONFIG" \
             --message "github rollback" --yes 2>&1 | sed -E "$REDACT"
+
+      # Read-only CPU distribution from account analytics (needs Account Analytics: Read).
+      - name: CPU metrics
+        if: inputs.action == 'metrics'
+        run: |
+          set -euo pipefail
+          since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          q='query($a:String!,$w:String!,$s:Time!){viewer{accounts(filter:{accountTag:$a}){
+            byStatus: workersInvocationsAdaptive(limit:100,filter:{scriptName:$w,datetime_geq:$s}){
+              dimensions{status} sum{requests errors subrequests}
+              quantiles{cpuTimeP50 cpuTimeP75 cpuTimeP99} max{cpuTime}}
+            byTime: workersInvocationsAdaptive(limit:400,filter:{scriptName:$w,datetime_geq:$s},
+              orderBy:[datetimeFifteenMinutes_ASC]){
+              dimensions{datetimeFifteenMinutes status} sum{requests subrequests}
+              quantiles{cpuTimeP50} max{cpuTime}}}}}'
+          out=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'content-type: application/json' \
+            --data "$(jq -cn --arg q "$q" --arg a "$CLOUDFLARE_ACCOUNT_ID" --arg w "$WORKER" --arg s "$since" \
+              '{query:$q,variables:{a:$a,w:$w,s:$s}}')" https://api.cloudflare.com/client/v4/graphql)
+          jq -e '.errors == null' <<<"$out" >/dev/null || { jq -c '[.errors[]?.message]' <<<"$out"; exit 1; }
+          echo "== 상태별 (CPU 단위 ms, 최근 7일)"
+          jq -r '.data.viewer.accounts[0].byStatus[] | "\(.dimensions.status) 요청 \(.sum.requests) 외부호출 \(.sum.subrequests) P50 \(.quantiles.cpuTimeP50/1000) P75 \(.quantiles.cpuTimeP75/1000) P99 \(.quantiles.cpuTimeP99/1000) 최대 \(.max.cpuTime/1000)"' <<<"$out"
+          echo "== 15분 단위"
+          jq -r '.data.viewer.accounts[0].byTime[] | "\(.dimensions.datetimeFifteenMinutes) \(.dimensions.status) 요청 \(.sum.requests) 외부호출 \(.sum.subrequests) P50 \(.quantiles.cpuTimeP50/1000) 최대 \(.max.cpuTime/1000)"' <<<"$out"
 
       # Additive migrations only. A Time Travel bookmark taken first is the restore
       # point; no data is exported (logs of this public repository are public).
