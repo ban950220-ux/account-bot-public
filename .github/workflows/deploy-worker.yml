@@ -42,8 +42,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
+          package-manager-cache: false
           node-version: "22"
       - name: Test D1 and Worker contracts without external calls
         env:
@@ -67,8 +68,9 @@ jobs:
       MIGRATION: ${{ inputs.migration }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
+          package-manager-cache: false
           node-version: "22"
       - name: Install pinned wrangler
         run: npm ci --no-audit --no-fund
