@@ -239,8 +239,13 @@ def test_js_candidate_matches_python_for_synthetic_boundaries() -> None:
         await getattr(controller, name)(SimpleNamespace(effective_message=message), None)
         return "".join(message.chunks)
 
+    # The cloud Worker now has commands the legacy Python bot lacks (/모으기시점,
+    # /모으기삭제, ...), so /start and /help intentionally differ. Both still show
+    # the read-only notice; tests/cloud_js_help.test.mjs checks the cloud help
+    # only names commands the router accepts.
     for name in ("start", "help"):
-        assert js["staticCommands"][name] == asyncio.run(static_reply(name))
+        assert "READ ONLY" in js["staticCommands"][name]
+        assert "READ ONLY" in asyncio.run(static_reply(name))
     async def stock_reply(case: dict) -> str:
         class Message:
             text = "/stock" + (" " + case["raw"] if case["raw"] else "")
