@@ -79,3 +79,27 @@ Cloudflare 계정이 Workers Free 요금제다. Free는 요청 1건(정기 실�
 
 - 배포 workflow에 읽기 전용 `metrics` 동작 추가(`46d2a78`). 기존 토큰으로 계정 분석 조회가 됐다.
 - 위 "현재 측정"과 "명령별 측정"이 결과다.
+
+### 1단계 코드 (2026-11-25)
+
+- 추가: `deploy/cloudflare-js/zoned-time.mjs`
+  - `zonedParts(date, timeZone)`: `Asia/Seoul`이면 UTC+9 산술로, 다른 시간대면 기존 `Intl` 경로로 계산한다.
+  - `validTimeZone(timeZone)`
+- 교체: `Intl.DateTimeFormat` 생성 다섯 곳
+  - `operating-worker.mjs`: 설정 검증, 정기 실행 날짜
+  - `boundary.mjs`: 정기 실행 시각 판정
+  - `assets-report.mjs`: 보고서 기준 시각
+  - `analysis-report.mjs`: 기준종가 날짜
+  - `kiwoom-readonly.mjs`: 조회 날짜
+- 테스트 `tests/cloud_js_zoned_time.test.mjs` 3개
+  - 경계 시각(자정·연말·윤년)과 2년간 7시간 13분 간격의 모든 시각에서 산술 결과가 `Intl` 결과와 같다.
+  - 다른 시간대(서머타임 포함)는 `Intl` 경로를 쓴다.
+  - 정기 실행 판정과 보고서 시각 문구가 그대로다.
+- 결과: JS 175개 통과, Python 233개 통과·1개 건너뜀, ruff 통과, 이관 점검 통과, 번들 생성 성공
+- 로컬 첫 실행 CPU(DB 제외, 변경 전 → 후)
+  - 일간보 작성 18.1 → 5.7ms
+  - `/weekly` 19.8 → 10.9ms
+  - 주간보 작성 15.7 → 10.9ms
+  - `/추천` 10.6 → 8.5ms
+  - `/모으기` 7.5 → 8.2ms (측정 오차 범위)
+  - 운영 수치는 배포 후 `metrics`로 확인한다.

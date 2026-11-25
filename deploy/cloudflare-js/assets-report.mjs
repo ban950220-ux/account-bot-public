@@ -1,6 +1,7 @@
 // Pure /assets formatter candidate. Input is normalized, synthetic or
 // read-only broker results plus an aggregateCoverage snapshot.
 import { add, compare, decimal, display, divide28, exact, multiply, round28, subtract } from './finance.mjs';
+import { zonedParts } from './zoned-time.mjs';
 
 const zero = () => decimal('0');
 const usable = new Set(['ok', 'partial', 'stale']);
@@ -31,10 +32,7 @@ export function percent(value) {
 }
 
 export function localTime(iso) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(iso)).map(({ type, value }) => [type, value]));
+  const parts = zonedParts(new Date(iso), 'Asia/Seoul');
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 

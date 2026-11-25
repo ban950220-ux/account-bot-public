@@ -1,4 +1,5 @@
 // Pure Worker boundaries. No live endpoint, credentials, or network calls.
+import { zonedParts } from './zoned-time.mjs';
 const HEADER = 'x-telegram-bot-api-secret-token';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -44,11 +45,7 @@ export function dueJobs(utcIso, timezoneName, dailyTime, weeklyTime, weeklyWeekd
   // Cron has minute precision. Round only the controller's timestamp down;
   // never substitute invocation/arrival time or round into the next minute.
   at.setUTCSeconds(0, 0);
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: timezoneName, weekday: 'short', hour: '2-digit', minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(at).map(({ type, value }) => [type, value]));
+  const parts = zonedParts(at, timezoneName);
   const weekday = WEEKDAYS.get(parts.weekday);
   const clock = `${parts.hour}:${parts.minute}:${parts.second}`;
   const normalizeTime = value => {

@@ -1,6 +1,7 @@
 // Pure HTML formatter for a normalized, provider-attributed analysis result.
 import { compare, decimal, display, exact, multiply } from './finance.mjs';
 import { html, money, percent } from './assets-report.mjs';
+import { zonedParts } from './zoned-time.mjs';
 
 const score = value => value == null ? '보류' : display(decimal(value), 2).replaceAll(',', '');
 export function fixed(value, places) {
@@ -68,8 +69,8 @@ export function formatAnalysis(result) {
   if (result.valuation) {
     const v = result.valuation;
     if (v.closePrice != null) {
-      const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul',
-        year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(v.asOf));
+      const d = zonedParts(new Date(v.asOf), 'Asia/Seoul');
+      const date = `${d.year}-${d.month}-${d.day}`;
       lines.push(`주간 기준종가 ${fixed(v.closePrice, 2)} · ${date}`);
     }
     if (v.forwardPe != null) lines.push(`Forward PER ${fixed(v.forwardPe, 2)}x`);

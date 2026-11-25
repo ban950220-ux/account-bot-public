@@ -2,6 +2,7 @@
 import { normalizeKiwoomCash, normalizeKiwoomPositions,
   normalizeKiwoomUsCash } from './rest-normalizers.mjs';
 import { compare, decimal, exact, multiply } from './finance.mjs';
+import { zonedParts } from './zoned-time.mjs';
 
 const ORIGINS = new Set(['https://api.kiwoom.com', 'https://mockapi.kiwoom.com']);
 const QUERIES = new Map([
@@ -94,9 +95,7 @@ export function createKiwoomReadOnlyProvider({ name, accountId, appKey, appSecre
   }
   const identity = { broker: name, accountId };
   function localDay() {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(new Date(now())).map(part => [part.type, part.value]));
+    const parts = zonedParts(new Date(now()), 'Asia/Seoul');
     return `${parts.year}-${parts.month}-${parts.day}`;
   }
   async function fills(rawPages, key, marketRegion, day) {

@@ -9,6 +9,7 @@ import { createOperatingGateway } from './operating-gateway.mjs';
 import { requireActiveCutover, legacyReportSuppressed } from './cutover-state.mjs';
 import { createD1QueryBudget } from './d1-budget.mjs';
 import { createExternalRequestBudget } from './external-budget.mjs';
+import { validTimeZone, zonedParts } from './zoned-time.mjs';
 
 const MAX_BODY = 64 * 1024;
 function positiveId(value) {
@@ -21,11 +22,7 @@ export function operatingConfig(env) {
     env.TELEGRAM_ALLOWED_USER_IDS.split(',').map(value => positiveId(value.trim())) : [];
   const chat = positiveId(env?.TELEGRAM_CHAT_ID);
   const weekday = Number(env?.WEEKLY_REPORT_WEEKDAY);
-  let timezoneValid = false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: env?.REPORT_TIMEZONE });
-    timezoneValid = true;
-  } catch { /* invalid timezone is not accepted */ }
+  const timezoneValid = validTimeZone(env?.REPORT_TIMEZONE);
   const clock = value => typeof value === 'string' &&
     /^(?:[01]\d|2[0-3]):[0-5]\d(?::00)?$/.test(value);
   if (!env?.DB || !/^\d+:[A-Za-z0-9_-]{20,}$/.test(env.TELEGRAM_BOT_TOKEN || '') ||
@@ -99,9 +96,7 @@ async function deliverRows(db, prefix, config, destination, fetcher, now,
 }
 
 function localDay(iso, timezone) {
-  const fields = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date(iso)).map(part => [part.type, part.value]));
+  const fields = zonedParts(new Date(iso), timezone);
   return `${fields.year}${fields.month}${fields.day}`;
 }
 
