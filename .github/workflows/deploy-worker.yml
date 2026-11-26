@@ -8,7 +8,7 @@ on:
       action:
         description: "check: read-only status · deploy: test, upload and deploy master · rollback: redeploy version_id · migrate: apply one additive D1 migration"
         type: choice
-        options: [check, deploy, rollback, migrate, metrics]
+        options: [check, deploy, rollback, migrate, metrics, logs]
         default: check
         required: true
       version_id:
@@ -154,6 +154,37 @@ jobs:
           jq -r '.data.viewer.accounts[0].byStatus[] | "\(.dimensions.status) 요청 \(.sum.requests) 외부호출 \(.sum.subrequests) P50 \(.quantiles.cpuTimeP50/1000) P75 \(.quantiles.cpuTimeP75/1000) P99 \(.quantiles.cpuTimeP99/1000) 최대 \(.max.cpuTime/1000)"' <<<"$out"
           echo "== 15분 단위"
           jq -r '.data.viewer.accounts[0].byTime[] | "\(.dimensions.datetimeFifteenMinutes) \(.dimensions.status) 요청 \(.sum.requests) 외부호출 \(.sum.subrequests) P50 \(.quantiles.cpuTimeP50/1000) 최대 \(.max.cpuTime/1000)"' <<<"$out"
+
+      # Per-invocation CPU from Workers Logs (read-only). The repository is public,
+      # so only timestamps, event type, outcome and CPU/wall times are printed;
+      # raw events (request headers etc.) never reach the log.
+      - name: Request logs
+        if: inputs.action == 'logs'
+        run: |
+          set -euo pipefail
+          to=$(($(date +%s) * 1000)); from=$((to - 3 * 24 * 3600 * 1000))
+          body=$(jq -cn --argjson f "$from" --argjson t "$to" --arg w "$WORKER" '{
+            queryId: "account-bot-cpu", view: "invocations", limit: 100,
+            timeframe: {from: $f, to: $t},
+            parameters: {filters: [{key: "$metadata.service", operation: "eq", type: "string", value: $w}]}}')
+          out=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'content-type: application/json' --data "$body" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/observability/telemetry/query")
+          code=$(tail -n1 <<<"$out"); json=$(head -n -1 <<<"$out")
+          echo "HTTP $code"
+          if [ "$code" != 200 ]; then jq -c '[.errors[]? | {code, message}]' <<<"$json" || true; exit 1; fi
+          echo "== 결과 구조(키 이름만)"
+          jq -c '.result | keys' <<<"$json"
+          jq -c '[.result | .. | objects | keys[]] | unique | map(select(test("cpu|wall|time|outcome|event|type|command|cmd|cold|version";"i")))' <<<"$json"
+          echo "== 요청별 (시각 UTC, 종류, 결과, CPU ms, 경과 ms, 명령)"
+          jq -r '[.result | .. | objects | select(has("$workers") or has("$metadata"))] | .[] |
+            [(.timestamp // .["$metadata"].timestamp // "-"),
+             (.["$workers"].eventType // .["$metadata"].type // "-"),
+             (.["$workers"].outcome // "-"),
+             (.["$workers"].cpuTimeMs // "-"),
+             (.["$workers"].wallTimeMs // "-"),
+             (.["$metadata"].message // .message // "" | tostring | if test("^cmd=[a-z_]+$") then . else "" end)]
+            | @tsv' <<<"$json" | sort | head -100
 
       # Additive migrations only. A Time Travel bookmark taken first is the restore
       # point; no data is exported (logs of this public repository are public).
