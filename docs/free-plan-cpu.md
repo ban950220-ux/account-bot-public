@@ -123,3 +123,6 @@ Cloudflare 계정이 Workers Free 요금제다. Free는 요청 1건(정기 실�
 - `wrangler.production.json`에 `observability`(Workers Logs, 표본 100%)를 켰다. Free 플랜 포함이고 보존 기간은 짧다(Free 3일).
 - Worker 코드에는 `console` 출력이 없어서 메시지 본문·금액은 기록되지 않는다. 다만 Cloudflare가 남기는 요청 메타데이터(URL·헤더 등)는 계정 안에 저장된다.
 - Actions `deploy` run #22 (master `94d57c6`): 새 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a` 운영 100%, webhook 403, 설정 조회에서 `observability.enabled: true`·`logs.invocation_logs: true` 확인. 직전 버전 `6f1fcf2d-53b6-4b59-9db6-15c01251d246`.
+- 명령 이름 기록: webhook 요청마다 `cmd=<명령>`(없으면 `cmd=none`), 정기 실행 작업마다 `cmd=<작업>`을 남긴다. 소문자 명령 이름만 쓰고 인자·본문은 쓰지 않는다.
+- Actions `deploy` run #24 (master `6c8ff4d`): 새 버전 `4b08901d-819a-43de-9a32-308d523b22c3` 운영 100%, webhook 403. 직전 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a`.
+- Actions `logs` run #25: 토큰에 Workers Observability 권한 추가 뒤 HTTP 200(run #23은 403). 요청별 CPU·경과 시간이 조회됐다. 배포 전 요청에는 명령 이름 기록이 없어서 명령 열은 비어 있다.

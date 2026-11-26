@@ -95,3 +95,4 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 | 2026-11-25 | `e810ddc` | `7e32e657-ff4b-4eb3-ab23-8a7915458217` | Free CPU 대응 1단계: 한국 시간 산술 계산 | run 성공, 운영 100%, webhook 403. 직전 버전 `33d05e5a-7461-41ca-81de-2bc7b3999846` |
 | 2026-11-25 | `7304378` | `6f1fcf2d-53b6-4b59-9db6-15c01251d246` | `/start`·`/help` 최신화 | run 성공, 운영 100%, webhook 403. 직전 버전 `7e32e657-ff4b-4eb3-ab23-8a7915458217` |
 | 2026-11-26 | `94d57c6` | `8d167ae7-20c8-47ae-b6ec-26f2512e730a` | Workers Logs(요청별 CPU 기록) 켬 | run 성공, 운영 100%, webhook 403. 직전 버전 `6f1fcf2d-53b6-4b59-9db6-15c01251d246` |
+| 2026-11-26 | `6c8ff4d` | `4b08901d-819a-43de-9a32-308d523b22c3` | 요청별 명령 이름 기록 | run 성공, 운영 100%, webhook 403. 직전 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a` |
