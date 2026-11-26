@@ -635,6 +635,12 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
   return null;
 }
 
+// One line per invocation for Workers Logs: the canonical command name only,
+// never its arguments or the message text, so per-request CPU can be attributed.
+export function logCommand(name) {
+  if (/^[a-z_]{1,40}$/.test(name)) console.log(`cmd=${name}`);
+}
+
 export async function routeUpdate({ headerEntries, body, secret, allowedUserIds,
   botUsername = null, gateway, signal, atomicDelivery = false,
   now = () => new Date().toISOString() }) {
@@ -642,6 +648,7 @@ export async function routeUpdate({ headerEntries, body, secret, allowedUserIds,
   if (updateId === null) return { status: 'DENIED', updateId: null, reply: null };
   const update = JSON.parse(new TextDecoder().decode(body));
   const parsed = parse(update.message?.text || '', botUsername);
+  logCommand(parsed?.command || 'none');
   if (!parsed?.command) return { status: 'IGNORED', updateId, reply: null };
   const delivery = atomicDelivery ? { updateId,
     destination: String(update.message.chat.id), now: now() } : null;

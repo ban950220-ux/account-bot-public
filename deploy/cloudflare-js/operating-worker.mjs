@@ -1,6 +1,6 @@
 // Production-boundary candidate. External read-only providers are injected; no default credentials.
 import { admittedUpdateId, dueJobs } from './boundary.mjs';
-import { routeUpdate, weeklyExtras } from './command-router.mjs';
+import { logCommand, routeUpdate, weeklyExtras } from './command-router.mjs';
 import { buildPeriodicReport } from './periodic-report.mjs';
 import { beginSend, enqueueReportChunks, enqueueUpdateChunks, finishSend } from './outbox.mjs';
 import { sendTelegramOnce, splitTelegramMessage } from './telegram-transport.mjs';
@@ -174,6 +174,7 @@ export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
       if (reportDay !== localDay(now(), config.timezone)) return;
       const gateway = await gatewayFactory(env, config, { fetcher: readFetcher, now });
       for (const job of jobs) {
+        logCommand(job);
         if (job === 'weekly_valuation') {
           if (typeof gateway.refreshValuations !== 'function') {
             throw new Error('valuation refresh adapter unavailable');

@@ -16,3 +16,16 @@ test('help and start only name commands the router accepts', () => {
     '추천적용', '분석갱신']) assert.ok(named.has(feature), feature);
   assert.ok(HELP.length < 3900, 'fits one Telegram message');
 });
+
+test('command logging writes only a canonical command name', async () => {
+  const { logCommand } = await import('../deploy/cloudflare-js/command-router.mjs');
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    for (const value of ['recurring_set', 'daily', 'none', '모으기', 'QQQ 4000', 'x'.repeat(41)]) {
+      logCommand(value);
+    }
+  } finally { console.log = original; }
+  assert.deepEqual(lines, ['cmd=recurring_set', 'cmd=daily', 'cmd=none']);
+});
