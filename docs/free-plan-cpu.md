@@ -117,3 +117,9 @@ Cloudflare 계정이 Workers Free 요금제다. Free는 요청 1건(정기 실�
 - 배포 확인용 무인증 요청: 2.1·2.5ms
 - `exceededResources` 0건
 - 판단: 1단계는 효과가 있었지만 완료 기준(모든 요청 10ms 미만)에는 못 미친다. 남은 비용의 위치를 요청별로 확인해야 한다.
+
+### 2단계 준비: 요청별 기록 (2026-11-26)
+
+- `wrangler.production.json`에 `observability`(Workers Logs, 표본 100%)를 켰다. Free 플랜 포함이고 보존 기간은 짧다(Free 3일).
+- Worker 코드에는 `console` 출력이 없어서 메시지 본문·금액은 기록되지 않는다. 다만 Cloudflare가 남기는 요청 메타데이터(URL·헤더 등)는 계정 안에 저장된다.
+- Actions `deploy` run #22 (master `94d57c6`): 새 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a` 운영 100%, webhook 403, 설정 조회에서 `observability.enabled: true`·`logs.invocation_logs: true` 확인. 직전 버전 `6f1fcf2d-53b6-4b59-9db6-15c01251d246`.
