@@ -20,5 +20,9 @@
       "database_name": "account-bot-production",
       "database_id": "aa55d17f-9560-4e48-b06c-166c53a21126"
     }
-  ]
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
 }

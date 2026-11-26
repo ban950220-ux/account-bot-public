@@ -219,6 +219,8 @@ jobs:
           done
           test "$live" = "$TARGET_VERSION" || { echo "100% 버전이 $live 입니다 (기대: $TARGET_VERSION)"; exit 1; }
           echo "운영 100%: $live"
+          api "/workers/scripts/$WORKER/script-settings" |
+            jq -c '{"요청 기록(observability)": .result.observability}' || echo "설정 조회 실패(배포와 무관)"
           # Unauthenticated POST must be refused (403); 503 means config is broken.
           for i in 1 2 3 4 5 6; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
