@@ -176,14 +176,19 @@ jobs:
           echo "== 결과 구조(키 이름만)"
           jq -c '.result | keys' <<<"$json"
           jq -c '[.result | .. | objects | keys[]] | unique | map(select(test("cpu|wall|time|outcome|event|type|command|cmd|cold|version";"i")))' <<<"$json"
-          echo "== 요청별 (시각 UTC, 종류, 결과, CPU ms, 경과 ms, 명령)"
-          jq -r '[.result | .. | objects | select(has("$workers") or has("$metadata"))] | .[] |
-            [(.timestamp // .["$metadata"].timestamp // "-"),
-             (.["$workers"].eventType // .["$metadata"].type // "-"),
-             (.["$workers"].outcome // "-"),
-             (.["$workers"].cpuTimeMs // "-"),
-             (.["$workers"].wallTimeMs // "-"),
-             (.["$metadata"].message // .message // "" | tostring | if test("^cmd=[a-z_]+$") then . else "" end)]
+          echo "== 요청별 (시각 KST, 종류, 결과, CPU ms, 경과 ms, 명령)"
+          # Events of one invocation (the request record and its cmd= log lines)
+          # are grouped by request id; only a lowercase cmd= name is printed.
+          jq -r '[.result.invocations | if type == "object" then .[] else . end] |
+            map(if type == "array" then . else [.] end) | .[] | . as $ev |
+            ($ev | map(select(.["$workers"].cpuTimeMs != null)) | first) as $inv |
+            select($inv != null) |
+            [($inv.timestamp // $inv["$metadata"].timestamp | tonumber / 1000 + 32400 |
+               floor | strftime("%m/%d %H:%M:%S")),
+             ($inv["$workers"].eventType // "-"), ($inv["$workers"].outcome // "-"),
+             $inv["$workers"].cpuTimeMs, ($inv["$workers"].wallTimeMs // "-"),
+             ([$ev[] | (.["$metadata"].message // .source.message // .message // "") |
+               tostring | select(test("^cmd=[a-z_]{1,40}$"))] | unique | join(","))]
             | @tsv' <<<"$json" | sort | head -100
 
       # Additive migrations only. A Time Travel bookmark taken first is the restore
