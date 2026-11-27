@@ -206,3 +206,8 @@ Cloudflare Worker
 | `/weekly` | 39~51 | 30~42 |
 | `/help` | 5 | 5 |
 | `/policy` | 5~8 | 4~5 |
+
+### 1단계 배포 (2026-11-27)
+
+- Actions `deploy` run #29 (master `3ecc950`): Worker 테스트 통과, 새 버전 `58109861-6554-4359-be47-953dd27561de` 운영 100%, webhook 무인증 POST 403.
+- 되돌릴 직전 버전: `4b08901d-819a-43de-9a32-308d523b22c3`

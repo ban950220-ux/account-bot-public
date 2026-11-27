@@ -96,3 +96,4 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 | 2026-11-25 | `7304378` | `6f1fcf2d-53b6-4b59-9db6-15c01251d246` | `/start`·`/help` 최신화 | run 성공, 운영 100%, webhook 403. 직전 버전 `7e32e657-ff4b-4eb3-ab23-8a7915458217` |
 | 2026-11-26 | `94d57c6` | `8d167ae7-20c8-47ae-b6ec-26f2512e730a` | Workers Logs(요청별 CPU 기록) 켬 | run 성공, 운영 100%, webhook 403. 직전 버전 `6f1fcf2d-53b6-4b59-9db6-15c01251d246` |
 | 2026-11-26 | `6c8ff4d` | `4b08901d-819a-43de-9a32-308d523b22c3` | 요청별 명령 이름 기록 | run 성공, 운영 100%, webhook 403. 직전 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a` |
+| 2026-11-27 | `3ecc950` | `58109861-6554-4359-be47-953dd27561de` | `localeCompare` 제거(안 A 1단계) | run #29 성공, 운영 100%, webhook 403. 직전 버전 `4b08901d-819a-43de-9a32-308d523b22c3` |
