@@ -636,6 +636,14 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
   return null;
 }
 
+// Read-only command replies that the Actions job precomputes. They take no
+// arguments and write nothing, so the same reply can be rendered outside the Worker.
+export const PRECOMPUTED_COMMANDS = Object.freeze(['recurring', 'weekly', 'recommend']);
+export async function renderCommand(command, gateway) {
+  if (!PRECOMPUTED_COMMANDS.includes(command)) throw new TypeError('command is not precomputed');
+  return replyFor({ command, raw: '', args: [] }, gateway, null, undefined, null);
+}
+
 // One line per invocation for Workers Logs: the canonical command name only,
 // never its arguments or the message text, so per-request CPU can be attributed.
 export function logCommand(name) {

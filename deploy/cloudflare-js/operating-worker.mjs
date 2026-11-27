@@ -100,6 +100,26 @@ function localDay(iso, timezone) {
   return `${fields.year}${fields.month}${fields.day}`;
 }
 
+// The text of a scheduled report. Shared with the Actions precompute job, which
+// must produce the same bytes from the same data.
+export async function buildReportText(job, gateway) {
+  const [refresh, plans] = await Promise.all([
+    gateway.refresh({ force: true, allBrokers: false }), gateway.listPlans(true),
+  ]);
+  const analyses = gateway.analysisProvider && plans.length ?
+    await gateway.analyzePlans(plans, refresh.snapshot) : {};
+  let signals = new Map();
+  let summary = null;
+  if (gateway.signalRefreshEnabled && gateway.signals) {
+    if (job === 'weekly') ({ signals, summary } = await weeklyExtras(gateway, plans));
+    else {
+      try { signals = await gateway.signals.read(plans); }
+      catch { /* Scores are optional; the report is not. */ }
+    }
+  }
+  return buildPeriodicReport(job, refresh.snapshot, refresh, plans, analyses, signals, summary);
+}
+
 export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
   providerFetcher = fetch,
   now = () => new Date().toISOString(), authorizeManualOwner = null, requireCutover = false }) {
@@ -190,22 +210,7 @@ export function createOperatingWorker({ gatewayFactory, fetcher = fetch,
           const claim = await config.db.prepare(`SELECT period_key FROM cloud_report_claims
             WHERE period_key = ?`).bind(key).first();
           if (claim) throw new Error('report claim without outbox');
-          const [refresh, plans] = await Promise.all([
-            gateway.refresh({ force: true, allBrokers: false }), gateway.listPlans(true),
-          ]);
-          const analyses = gateway.analysisProvider && plans.length ?
-            await gateway.analyzePlans(plans, refresh.snapshot) : {};
-          let signals = new Map();
-          let summary = null;
-          if (gateway.signalRefreshEnabled && gateway.signals) {
-            if (job === 'weekly') ({ signals, summary } = await weeklyExtras(gateway, plans));
-            else {
-              try { signals = await gateway.signals.read(plans); }
-              catch { /* Scores are optional; the report is not. */ }
-            }
-          }
-          const report = buildPeriodicReport(job, refresh.snapshot, refresh, plans, analyses,
-            signals, summary);
+          const report = await buildReportText(job, gateway);
           const chunks = splitTelegramMessage(report);
           // Reserve enqueue batch, outbox read, and begin/finish for every chunk
           // before claiming the period or making the first external send.

@@ -225,3 +225,66 @@ Cloudflare Worker
 - 정렬 결과는 같으므로 변경은 유지한다(되돌릴 이유 없음).
 - 1단계 완료 기준(운영 CPU 감소)은 충족하지 못했다.
 - 안 A의 본 작업(2~6단계)은 이 계산 자체를 Worker 밖으로 옮기므로 영향을 받지 않는다.
+
+### 2단계 코드 (2026-11-27)
+
+운영 Worker 동작은 바뀌지 않는다. 새 파일은 Worker 번들에 들어가지 않는다(번들 312.29 KiB, 이전과 같음).
+
+#### 답장 생성 분리
+
+- `command-router.mjs`
+  - `PRECOMPUTED_COMMANDS`: `recurring`, `weekly`, `recommend`
+  - `renderCommand(command, gateway)`: 기존 명령 처리 함수를 인자 없이 부른다. 그래서 같은 문구가 나온다.
+- `operating-worker.mjs`: 정기 보고서 문구 작성을 `buildReportText(job, gateway)`로 분리했다. 정기 실행이 이 함수를 쓴다(동작 동일).
+
+#### `deploy/cloudflare-js/d1-rest.mjs` (Actions용 D1 접속)
+
+- Worker의 D1 바인딩과 같은 모양이다: `prepare/bind/first/all/run/raw/batch`
+- 실행 전 검사(`statementKind`)
+  - 읽기(`SELECT`/`WITH`)는 쓰기 단어가 없을 때만 허용한다.
+  - 쓰기는 `cloud_precomputed`·`cloud_market_cache`에 대한 `INSERT`(+`ON CONFLICT DO UPDATE`)만 허용한다.
+  - 여러 문장, `REPLACE`, `PRAGMA` 등은 거부한다. 문자열 안의 단어는 무시한다.
+  - 거부된 문장은 네트워크로 보내지 않는다.
+- 오류 메시지에는 HTTP 상태와 오류 코드만 넣는다. SQL과 값은 넣지 않는다(공개 로그 대비).
+
+#### `deploy/cloudflare-js/precompute.mjs`
+
+- `inputFingerprint(db)`: SQL 1회로 다음 항목의 행 수·마지막 행 번호를 합친다.
+  - 계획(+버전 합계), 계획 revision, 계획 범위, 보관 이벤트
+  - 목표 버전·revision, thesis revision, 수동 입력 revision
+  - cutover 상태
+- `computeAll(env)`
+  - 명령 3종과 그날의 보고서를 만든다. 일간보는 평일, 주간보는 설정 요일만 만든다(`dueJobs`와 같은 규칙).
+  - 시작과 끝의 지문이 다르면 아무것도 남기지 않는다(`stable: false`).
+
+#### 테스트 `tests/cloud_js_precompute.test.mjs` 4개
+
+- 바이트 비교: 이관 fixture에 다음을 넣고 비교한다.
+  - 자료: 계획 8개 추가·1개 변경, 수동 입력(메리츠) 계획, 신호 6개
+  - Actions 경로: D1 REST 어댑터 → 가짜 REST(같은 SQLite)
+  - Worker 경로: 실제 webhook 처리와 정기 실행이 텔레그램으로 보낸 문구
+  - 결과: 두 경로의 출력이 바이트 단위로 같다.
+    - 명령 3종: 금요일·토요일 두 시점
+    - 금요일 08:00 일간보, 토요일 09:00 주간보
+- 지문: 계획 설정·목표 저장·보관·복원마다 바뀌고, `/모으기` 조회로는 바뀌지 않는다.
+- 계산 도중 계획이 바뀌면 결과를 버린다.
+- 어댑터: 허용 밖 쓰기 13가지를 보내기 전에 거부하고, 오류 메시지에 값이 새지 않는다.
+
+#### 작업 중 고친 것
+
+- 테스트 안의 명령 형식 오류: `/모으기설정 AMD 30USD` → 숫자만
+- 테스트 요청 번호 중복
+
+코드는 바꾸지 않았다.
+
+#### 결과
+
+- JS 184개 통과
+- Python 233개 통과·1개 건너뜀
+- ruff 통과, 이관 점검 통과
+
+**2단계 완료.**
+
+#### 남은 확인 (4단계에서)
+
+- 운영 Worker secret 이름: 키움·지문 값이 secret에 있으면 Actions 계산에도 같은 값이 필요하다. 값은 보지 않고 이름만 확인한다.
