@@ -1,6 +1,7 @@
 // Point-in-time view of recurring plans, built only from existing revisions.
 // Pure functions: the gateway supplies plans and revisions, nothing is written here.
 import { add, compare, decimal, exact, multiply } from './finance.mjs';
+import { collate } from './collate.mjs';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const pad = value => String(value).padStart(2, '0');
@@ -73,8 +74,8 @@ export function diffToMoment(plans, revisions, at) {
         target.enabled === plan.enabled) continue;
     changes.push({ plan, target, existed: Boolean(past) });
   }
-  return changes.sort((a, b) => a.plan.instrument.ticker.localeCompare(b.plan.instrument.ticker) ||
-    a.plan.planKey.localeCompare(b.plan.planKey));
+  return changes.sort((a, b) => collate(a.plan.instrument.ticker, b.plan.instrument.ticker) ||
+    collate(a.plan.planKey, b.plan.planKey));
 }
 
 // Weekly planned amount in KRW over enabled KRW plans; other currencies are counted apart.

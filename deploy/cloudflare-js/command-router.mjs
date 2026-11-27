@@ -14,6 +14,7 @@ import { compare, decimal, display } from './finance.mjs';
 import { formatLegacyHistory } from './legacy-history-report.mjs';
 import { changeEvents, diffToMoment, formatKst, momentArgs, momentToken, parseKstMoment,
   weeklyKrw } from './plan-history.mjs';
+import { collate } from './collate.mjs';
 
 const ALIASES = new Map([
   ['start', 'start'], ['help', 'help'], ['도움말', 'help'],
@@ -136,7 +137,7 @@ async function setPlansBatch(lines, gateway, updateId, signal, delivery) {
   const mutationKey = `update:${updateId}`;
   const label = plan => `${plan.instrument.market}:${plan.instrument.ticker}`;
   const render = (changed, unchanged = []) => {
-    const rows = [...changed].sort((a, b) => label(a).localeCompare(label(b)))
+    const rows = [...changed].sort((a, b) => collate(label(a), label(b)))
       .map(plan => `<b>${html(label(plan))}</b> ${money(plan.dailyAmount, plan.currency)} · ` +
         `${plan.enabled ? 'ON' : 'OFF'}`);
     return [`✅ <b>모으기 ${changed.length}종목 변경</b>`, ...rows,
@@ -261,7 +262,7 @@ async function momentReply(args, gateway, updateId, signal, delivery) {
   for (const method of ['planHistory', 'editPlans', 'replayedGroup']) requireGateway(gateway, method);
   const mutationKey = `update:${updateId}`;
   const render = changed => {
-    const names = [...changed].sort((a, b) => planLabel(a).localeCompare(planLabel(b)))
+    const names = [...changed].sort((a, b) => collate(planLabel(a), planLabel(b)))
       .map(plan => `${plan.instrument.ticker} ${money(plan.dailyAmount, plan.currency)} ` +
         `${plan.enabled ? 'ON' : 'OFF'}`);
     return [`↩️ <b>${html(moment.label)} 시점으로 ${changed.length}종목 되돌림</b>`,
@@ -438,7 +439,7 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
     requireGateway(gateway, 'replayedGroup');
     const mutationKey = `update:${updateId}`;
     const render = changed => `✅ <b>추천 ${changed.length}종목 반영</b>\n` +
-      html([...changed].sort((a, b) => a.instrument.ticker.localeCompare(b.instrument.ticker))
+      html([...changed].sort((a, b) => collate(a.instrument.ticker, b.instrument.ticker))
         .map(plan => `${plan.instrument.ticker}(${money(plan.dailyAmount, plan.currency)})`)
         .join(', ')) + '\n\n봇의 모으기 계획만 변경했으며 증권사 주문은 실행하지 않았습니다.';
     const replayed = await gateway.replayedGroup(mutationKey);
@@ -608,7 +609,7 @@ async function replyFor(parsed, gateway, updateId, signal, delivery) {
       const action = stop ? '모으기 중단' : `${compare(decimal(delta), decimal('0')) > 0 ? '+' : ''}` +
         `${display(decimal(delta), 0)}원 변경`;
       const details = [...changed].sort((a, b) =>
-        a.instrument.ticker.localeCompare(b.instrument.ticker))
+        collate(a.instrument.ticker, b.instrument.ticker))
         .map(plan => `${plan.instrument.ticker}(${money(plan.dailyAmount, plan.currency)})`).join(', ');
       return `✅ <b>${assetType === 'ETF' ? 'ETF' : '개별주'} ${changed.length}종목</b> ` +
         `${action}\n${html(details)}\n\n` +

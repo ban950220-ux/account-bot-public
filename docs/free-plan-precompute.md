@@ -175,3 +175,34 @@ Cloudflare Worker
 
 - 저장 결과 사용 기한 2시간이 괜찮은지
 - 단계 5의 GitHub 토큰을 Worker에 넣는 것에 동의하는지
+
+## 단계별 기록
+
+### 1단계 코드 (2026-11-27)
+
+- 사용자가 설계를 확인했다("진행해", 2026-11-27). 사용 기한 2시간과 단계 5의 토큰도 이대로 진행한다.
+- 추가: `deploy/cloudflare-js/collate.mjs` `collate(a, b)`
+  - 문자열 정렬 규칙(root collation)을 직접 계산한다. 다음 문자에서 `localeCompare`와 같은 결과를 낸다.
+    - 출력 가능한 ASCII: 기호 < 숫자 < 영문. 대소문자는 마지막에 비교하고 소문자가 앞이다.
+    - 한글 완성형 음절: 영문 뒤, 글자 코드 순
+  - 그 밖의 문자가 하나라도 있으면 `localeCompare`로 넘긴다. 그래서 순서는 절대 바뀌지 않는다.
+- 교체: `localeCompare` 16곳
+  - `aggregation`, `allocation-policy`, `cloud-gateway`, `command-router`, `plan-history`, `rebalance`
+- 테스트 `tests/cloud_js_collate.test.mjs` 3개
+  - 무작위 문자열 10만 쌍이 `localeCompare`와 같다. 작업 중 별도로 30만 쌍도 확인했다.
+  - 실제 키 모양(종목 키, 증권사 이름, 한글 묶음 이름)과 모델 밖 문자(악센트, 이모지, 탭, 자모)의 정렬 결과가 같다.
+  - Worker 모듈에 `localeCompare` 직접 호출이 남지 않았다.
+- 결과
+  - JS 180개 통과
+  - Python 233개 통과·1개 건너뜀
+  - ruff 통과, 이관 점검 통과
+  - 번들 생성 성공(312.28 KiB)
+- 로컬 첫 실행 CPU (2단계-가 방식, ms)
+
+| 명령 | 변경 전 | 변경 후 |
+|---|---|---|
+| `/모으기` | 45~47 | 31~34 |
+| `/추천` | 44~46 | 18~22 |
+| `/weekly` | 39~51 | 30~42 |
+| `/help` | 5 | 5 |
+| `/policy` | 5~8 | 4~5 |

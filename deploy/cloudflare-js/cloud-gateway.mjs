@@ -9,6 +9,7 @@ import { appendThesis, applyGroupChanges, applyPlanChange, createPlanOnce,
 import { enqueueUpdate } from './outbox.mjs';
 import { currentPolicy, savePolicy } from './policy-store.mjs';
 import { recordTransactionOnce } from './storage.mjs';
+import { collate } from './collate.mjs';
 
 const KR = new Set(['KOSPI', 'KOSDAQ', 'KRX', 'NXT']);
 const US = new Set(['US', 'USA', 'NASDAQ', 'NAS', 'NYSE', 'AMEX', 'ARCA', 'NYSEARCA']);
@@ -89,7 +90,7 @@ export class SyntheticCloudGateway {
     }
     for (const plan of local) merged.set(`${stable(plan)}:${plan.broker}`, plan);
     return [...merged.values()].sort((a, b) =>
-      a.broker.localeCompare(b.broker) || stable(a).localeCompare(stable(b)));
+      collate(a.broker, b.broker) || collate(stable(a), stable(b)));
   }
 
   async ownsPlan(plan) {

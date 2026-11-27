@@ -1,5 +1,6 @@
 // Source-scoped aggregation candidate with synthetic Decimal and alias parity.
 import { add, compare, decimal, divide28, exact, multiply, round28, subtract } from './finance.mjs';
+import { collate } from './collate.mjs';
 
 const US_MARKETS = new Set(['US', 'USA', 'NASDAQ', 'NAS', 'NYSE', 'AMEX', 'ARCA', 'NYSEARCA']);
 const US_GENERIC = new Set(['US', 'USA']);
@@ -194,7 +195,7 @@ export function aggregateCoverage({ baseCurrency = 'KRW', fxQuotes = [],
       costBasisBase: costBasisBase === null ? null : exact(costBasisBase),
       marketValueBase: marketValueBase === null ? null : exact(marketValueBase),
       weightPct: null,
-      brokerQuantities: [...brokerQuantities].sort(([a], [b]) => a.localeCompare(b))
+      brokerQuantities: [...brokerQuantities].sort(([a], [b]) => collate(a, b))
         .map(([broker, value]) => [broker, exact(value)]),
     });
   }

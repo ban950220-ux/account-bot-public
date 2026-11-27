@@ -2,6 +2,7 @@
 // Pure calculation over recurring plan amounts. No network, storage or order path.
 import { add, compare, decimal, display, divide28, exact, multiply, subtract } from './finance.mjs';
 import { html, money } from './assets-report.mjs';
+import { collate } from './collate.mjs';
 
 const zero = () => decimal('0');
 const hundred = () => decimal('100');
@@ -212,7 +213,7 @@ function evaluateCurrency(currency, plans, policy) {
   }
 
   const byLargest = (score, pool, id = item => item.plan.id) => [...pool].sort((a, b) =>
-    -compare(score(a), score(b)) || id(a).localeCompare(id(b)));
+    -compare(score(a), score(b)) || collate(id(a), id(b)));
   const reducible = item => item.movable &&
     compare(subtract(item.amount, step), item.minimum) >= 0;
   function reduce(item, reason) {
@@ -263,7 +264,7 @@ function evaluateCurrency(currency, plans, policy) {
     }
     if (!target && open.some(v => v.kind === 'budget')) {
       for (const [group] of [...state.groups].sort((a, b) =>
-        -compare(a[1], b[1]) || a[0].localeCompare(b[0]))) {
+        -compare(a[1], b[1]) || collate(a[0], b[0]))) {
         target = byLargest(candidate => contribution(candidate, group), items.filter(candidate =>
           reducible(candidate) && compare(contribution(candidate, group), zero()) > 0))[0];
         if (target) { reduce(target, '예산 초과'); break; }
@@ -281,7 +282,7 @@ function evaluateCurrency(currency, plans, policy) {
         [group, subtract(multiply(state.total, decimal(target)),
           multiply(state.groups.get(group) || zero(), hundred()))])
         .filter(([, gap]) => compare(gap, zero()) > 0)
-        .sort((a, b) => -compare(a[1], b[1]) || a[0].localeCompare(b[0]));
+        .sort((a, b) => -compare(a[1], b[1]) || collate(a[0], b[0]));
       let grown = null;
       for (const [group] of deficits) {
         const pool = byLargest(weeklyOf, items.filter(candidate => candidate.movable &&
@@ -347,7 +348,7 @@ export function evaluate(plans, policy) {
 export function proposalFingerprint(policyVersion, results) {
   const changes = results.flatMap(result => result.changes).map(change =>
     [change.plan.planKey, change.plan.version, change.to])
-    .sort((a, b) => a[0].localeCompare(b[0]));
+    .sort((a, b) => collate(a[0], b[0]));
   return changes.length ? JSON.stringify([policyVersion, changes]) : null;
 }
 
@@ -377,7 +378,7 @@ export function formatPolicy(policy, version) {
 function groupLines(result, side) {
   const total = decimal(result[side].weekly);
   return [...result[side].groups].sort((a, b) => -compare(decimal(a[1]), decimal(b[1])) ||
-    a[0].localeCompare(b[0])).map(([group, amount]) => {
+    collate(a[0], b[0])).map(([group, amount]) => {
     const prior = result.before.groups.find(([name]) => name === group)?.[1] ?? '0';
     const was = share(decimal(prior), decimal(result.before.weekly));
     const now = share(decimal(amount), total);
@@ -443,7 +444,7 @@ export function formatWeeklySummary(results, token) {
         (result.budgetWeekly ? ` · 예산 ${money(result.budgetWeekly, cur)}` : ''),
       '', '🧭 <b>섹터 쏠림</b>');
     for (const [group, amount] of [...result.before.groups].sort((a, b) =>
-      -compare(decimal(a[1]), decimal(b[1])) || a[0].localeCompare(b[0]))) {
+      -compare(decimal(a[1]), decimal(b[1])) || collate(a[0], b[0]))) {
       const heavy = compare(multiply(decimal(amount), hundred()),
         multiply(total, decimal('25'))) >= 0;
       lines.push(`• ${html(group)} ${share(decimal(amount), total)}${heavy ? ' ⚠️' : ''}`);

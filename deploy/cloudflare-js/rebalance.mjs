@@ -1,6 +1,7 @@
 // Read-only, new-money-only proposal. No order or sale transport exists here.
 import { add, compare, decimal, divide28, exact, multiply, round28, subtract } from './finance.mjs';
 import { html, money, percent } from './assets-report.mjs';
+import { collate } from './collate.mjs';
 
 const zero = () => decimal('0');
 const hundred = () => decimal('100');
@@ -94,7 +95,7 @@ export function suggestNewMoneyRebalance(snapshot, targets, newMoney) {
       const residual = subtract(available, allocated);
       if (compare(residual, zero()) !== 0) {
         const largest = [...deficits.keys()].sort((a, b) =>
-          compare(deficits.get(b), deficits.get(a)) || a.localeCompare(b))[0];
+          compare(deficits.get(b), deficits.get(a)) || collate(a, b))[0];
         allocations.set(largest, add(allocations.get(largest), residual));
       }
     }
