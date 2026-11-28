@@ -288,3 +288,73 @@ Cloudflare Worker
 #### 남은 확인 (4단계에서)
 
 - 운영 Worker secret 이름: 키움·지문 값이 secret에 있으면 Actions 계산에도 같은 값이 필요하다. 값은 보지 않고 이름만 확인한다.
+
+### 3단계 코드 (2026-11-28)
+
+#### 테이블
+
+- `deploy/cloudflare/migrations/2026-11-28-precomputed.sql`: `cloud_precomputed`
+  - 추가형이다. trigger는 없다. 파생 자료라서 덮어쓴다.
+  - `kind`는 5종만 허용하고 길이 상한을 둔다.
+- `schema.sql`에도 같은 정의를 추가했다.
+
+#### `deploy/cloudflare-js/precomputed-store.mjs` (Worker가 쓰는 작은 모듈)
+
+- `inputFingerprint`: `precompute.mjs`에서 옮겼다.
+- `usablePrecomputed(db, kind, { now, periodKey })`: 아래 중 하나라도 해당하면 `null`을 돌려준다. 그러면 Worker가 직접 계산한다.
+  - 행이 없다.
+  - 테이블이 없다(migration 전).
+  - 기간 키가 다르다.
+  - 2시간을 넘었다.
+  - 계산 시각이 미래다.
+  - 지문이 다르다.
+- `asOfLine`: `🕘 11/27 07:10 KST 기준`
+  - 설계는 시:분이었지만 자정 전후가 헷갈리지 않게 날짜를 넣었다.
+- `storePrecomputed`: Actions 작업이 저장할 때 쓴다(`INSERT … ON CONFLICT DO UPDATE`).
+
+#### Worker 연결
+
+- `routeUpdate`
+  - `/모으기`·`/weekly`·`/추천`을 인자 없이 보내면 `gateway.precomputedReply`를 먼저 본다.
+  - 저장된 결과가 있으면 그 문구를 보낸다(`mutationAttempted: false`, 기존 outbox 경로).
+  - 없거나 오류가 나면 기존 계산을 한다.
+- `operating-gateway`: `precomputedReply`를 붙인다. DB 조회는 2회다(결과 1, 지문 1).
+- 정기 보고서는 아직 연결하지 않았다(6단계).
+- Worker 번들: 315.46 KiB. Actions 전용 코드(`d1-rest`, `computeAll`)는 들어가지 않는다.
+
+#### 테스트
+
+`tests/cloud_js_precompute.test.mjs`에 1개를 추가했다(총 5개).
+
+- REST 어댑터로 저장한 결과를 Worker가 `기준 시각 + 저장 문구`로 보낸다(3종).
+- 저장 문구와 직접 계산한 문구는 같다.
+- 다음 경우에는 직접 계산 결과가 나온다.
+  - 인자가 있을 때
+  - 2시간 1초 뒤, 계산 시각 이전
+  - 기간 키가 다를 때
+  - 계획 변경 뒤
+  - 테이블이 없을 때
+- 조건이 다시 맞으면 저장 결과로 돌아온다.
+
+#### 결과
+
+- 검증
+  - JS 185개 통과
+  - Python 233개 통과·1개 건너뜀
+  - ruff, 이관 점검 통과
+- 로컬 첫 실행 CPU (2단계-가 방식, 저장 결과가 있을 때, ms)
+
+| 명령 | 직접 계산 | 저장 결과 |
+|---|---|---|
+| `/모으기` | 31~34 | 4.8~5.9 |
+| `/weekly` | 30~42 | 4.4~4.8 |
+| `/추천` | 18~22 | 4.0~5.3 |
+| `/help` (참고) | — | 4.2~4.5 |
+
+- 운영 `/help`가 9ms이므로 운영에서는 저장 결과 응답도 9ms 안팎으로 예상한다. 한도에 가깝다. 고정 비용 문제는 남는다.
+
+#### 남은 것 (승인 후)
+
+- 운영 migration
+- 배포 뒤 webhook 403 확인
+- Actions가 아직 결과를 만들지 않으므로 배포해도 운영 동작은 같다.

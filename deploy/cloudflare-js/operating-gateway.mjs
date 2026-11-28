@@ -5,6 +5,7 @@ import { latestMeritzRevision, manualSnapshotFreshness } from './manual-input.mj
 import { readLegacyHistory } from './legacy-read.mjs';
 import { createYahooChartReadOnly } from './yahoo-chart-readonly.mjs';
 import { createSignals } from './signals.mjs';
+import { asOfLine, usablePrecomputed } from './precomputed-store.mjs';
 
 const FINGERPRINT = /^[a-z][a-z0-9_]{0,30}_[0-9a-f]{64}$/;
 function requiredFingerprint(value) {
@@ -84,5 +85,10 @@ export async function createOperatingGateway(env, { now = () => new Date().toISO
   // scheduled runs touch them only when the owner enabled the plain flag.
   gateway.signals = createSignals({ db: env.DB, fetcher, now });
   gateway.signalRefreshEnabled = env.PUBLIC_SIGNAL_REFRESH_ENABLED === 'true';
+  // Replies the Actions job precomputed; null when this Worker must compute them.
+  gateway.precomputedReply = async kind => {
+    const stored = await usablePrecomputed(env.DB, kind, { now: now() });
+    return stored && `${asOfLine(stored.computedAt, env.REPORT_TIMEZONE || 'Asia/Seoul')}\n${stored.body}`;
+  };
   return gateway;
 }

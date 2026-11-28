@@ -15,7 +15,8 @@ import { splitTelegramMessage } from '../deploy/cloudflare-js/telegram-transport
 import { putMarketCaches } from '../deploy/cloudflare-js/market-cache.mjs';
 import { signalSymbol, trendFromWeeklyCloses } from '../deploy/cloudflare-js/signals.mjs';
 import { createD1Rest, statementKind } from '../deploy/cloudflare-js/d1-rest.mjs';
-import { computeAll, inputFingerprint } from '../deploy/cloudflare-js/precompute.mjs';
+import { computeAll, inputFingerprint, storePrecomputed } from '../deploy/cloudflare-js/precompute.mjs';
+import { asOfLine } from '../deploy/cloudflare-js/precomputed-store.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const ACCOUNT = 'a'.repeat(32);
@@ -203,4 +204,62 @@ test('the REST adapter refuses every write outside derived tables before sending
     fetcher: async () => ({ ok: false, status: 400, json: async () => ({ success: false, errors: [{ code: 7500 }] }) }) });
   await assert.rejects(failing.prepare('SELECT ? AS secret').bind('plan-data').first(),
     error => /HTTP 400, code 7500/.test(error.message) && !error.message.includes('plan-data'));
+});
+
+test('the Worker sends a stored reply only while every condition holds', async t => {
+  const { db, env } = await fixture(t);
+  const clock = { now: '2026-11-20T00:00:00.000Z' };
+  await seedPlans(db, env, clock);
+  const sent = [];
+  const worker = createOperatingWorker({ requireCutover: true, now: () => clock.now,
+    fetcher: async (_url, options) => { sent.push(JSON.parse(options.body).text);
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: sent.length } }) }; },
+    gatewayFactory: (e, _c, o) => createOperatingGateway(e, { ...o, now: () => clock.now }) });
+  let id = 8000;
+  const reply = async text => { sent.length = 0;
+    assert.equal((await worker.fetch(request(id++, text), env)).status, 200); return sent.join(''); };
+  // Stored through the REST adapter, as the Actions job will.
+  const rest = createD1Rest({ accountId: ACCOUNT, databaseId: DATABASE, token: 'fixture-token', fetcher: restFetcher(db) });
+  const precompute = async at => { const result = await computeAll({ ...env, DB: rest }, { now: () => at,
+    fetcher: async () => assert.fail() }); await storePrecomputed(rest, result.items); return result; };
+  const marker = '\u2063precomputed';
+  const mark = () => db.sqlite.exec(`UPDATE cloud_precomputed SET body = body || '${marker}'`);
+
+  clock.now = '2026-11-26T23:00:00.000Z';
+  const direct = await reply('/모으기');
+  assert.doesNotMatch(direct, /🕘/);
+  const result = await precompute('2026-11-26T22:10:00.000Z');
+  assert.equal(result.items.find(item => item.kind === 'recurring').body, direct);
+  mark();
+  const stored = await reply('/모으기');
+  assert.equal(stored, `${asOfLine('2026-11-26T22:10:00.000Z', 'Asia/Seoul')}\n${direct}${marker}`);
+  assert.match(stored, /^🕘 11\/27 07:10 KST 기준\n/);
+  assert.match(await reply('/추천'), new RegExp(marker));
+  assert.match(await reply('/weekly'), new RegExp(marker));
+  // Arguments always take the computed path.
+  assert.doesNotMatch(await reply('/모으기 전체'), new RegExp(marker));
+
+  // Older than two hours, or from the future.
+  clock.now = '2026-11-27T00:10:01.000Z';
+  assert.equal(await reply('/모으기'), direct);
+  clock.now = '2026-11-26T22:09:59.000Z';
+  assert.equal(await reply('/모으기'), direct);
+  clock.now = '2026-11-26T23:00:00.000Z';
+  assert.match(await reply('/모으기'), new RegExp(marker));
+  // Another period key.
+  db.sqlite.exec("UPDATE cloud_precomputed SET period_key = 'daily:20261127' WHERE kind = 'recurring'");
+  assert.equal(await reply('/모으기'), direct);
+  db.sqlite.exec("UPDATE cloud_precomputed SET period_key = '' WHERE kind = 'recurring'");
+  assert.match(await reply('/모으기'), new RegExp(marker));
+  // A plan change after the computation.
+  assert.match(await reply('/모으기설정 QQQ 40'), /QQQ/);
+  const changed = await reply('/모으기');
+  assert.doesNotMatch(changed, new RegExp(marker));
+  assert.doesNotMatch(changed, /🕘/);
+  // No table yet (before the migration): computed as today.
+  await precompute('2026-11-26T22:30:00.000Z');
+  mark();
+  assert.match(await reply('/모으기'), new RegExp(marker));
+  db.sqlite.exec('DROP TABLE cloud_precomputed');
+  assert.equal(await reply('/모으기'), changed);
 });

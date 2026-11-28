@@ -5,31 +5,11 @@ import { renderCommand, PRECOMPUTED_COMMANDS } from './command-router.mjs';
 import { buildReportText } from './operating-worker.mjs';
 import { createOperatingGateway } from './operating-gateway.mjs';
 import { zonedParts } from './zoned-time.mjs';
+import { COMMAND_KINDS, inputFingerprint } from './precomputed-store.mjs';
 
-export const COMMAND_KINDS = Object.freeze({ recurring: 'recurring', weekly: 'weekly_cmd',
-  recommend: 'recommend' });
+export { COMMAND_KINDS, inputFingerprint, storePrecomputed } from './precomputed-store.mjs';
 
-// Everything a precomputed reply depends on besides public prices and signals,
-// which age by time instead. Every plan, archive, policy, thesis and manual-input
-// change appends a row, so counts and the last row id move on every change.
-const FINGERPRINT_SQL = `SELECT
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) || '.' || coalesce(sum(version), 0) FROM cloud_plans) AS plans,
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) FROM cloud_plan_revisions) AS revisions,
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) FROM cloud_plan_scope) AS scope,
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) FROM cloud_plan_archive_events) AS archive,
-  (SELECT coalesce(max(version), 0) FROM cloud_policy) || '.' ||
-    (SELECT count(*) FROM cloud_policy_revisions) AS policy,
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) FROM cloud_thesis_revisions) AS thesis,
-  (SELECT count(*) || '.' || coalesce(max(rowid), 0) FROM cloud_manual_input_revisions) AS manual,
-  (SELECT coalesce(max(epoch || ':' || state || ':' || edits_enabled || ':' || sends_enabled), '-')
-    FROM cloud_cutover) AS cutover`;
 
-export async function inputFingerprint(db) {
-  const row = await db.prepare(FINGERPRINT_SQL).first();
-  if (!row) throw new Error('input fingerprint unavailable');
-  return ['plans', 'revisions', 'scope', 'archive', 'policy', 'thesis', 'manual', 'cutover']
-    .map(key => `${key}=${row[key]}`).join(';');
-}
 
 export function localDay(iso, timezone) {
   const fields = zonedParts(new Date(iso), timezone);

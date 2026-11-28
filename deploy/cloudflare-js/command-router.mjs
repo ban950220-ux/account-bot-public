@@ -15,6 +15,7 @@ import { formatLegacyHistory } from './legacy-history-report.mjs';
 import { changeEvents, diffToMoment, formatKst, momentArgs, momentToken, parseKstMoment,
   weeklyKrw } from './plan-history.mjs';
 import { collate } from './collate.mjs';
+import { COMMAND_KINDS } from './precomputed-store.mjs';
 
 const ALIASES = new Map([
   ['start', 'start'], ['help', 'help'], ['도움말', 'help'],
@@ -659,6 +660,17 @@ export async function routeUpdate({ headerEntries, body, secret, allowedUserIds,
   const parsed = parse(update.message?.text || '', botUsername);
   logCommand(parsed?.command || 'none');
   if (!parsed?.command) return { status: 'IGNORED', updateId, reply: null };
+  // A reply the Actions job precomputed from unchanged data; otherwise compute it here.
+  if (PRECOMPUTED_COMMANDS.includes(parsed.command) && !parsed.args.length &&
+      typeof gateway?.precomputedReply === 'function') {
+    let stored = null;
+    try { stored = await gateway.precomputedReply(COMMAND_KINDS[parsed.command]); }
+    catch { /* Fall back to computing the reply. */ }
+    if (stored) {
+      return { status: 'READY', updateId, reply: stored,
+        ...(atomicDelivery ? { mutationAttempted: false } : {}) };
+    }
+  }
   const delivery = atomicDelivery ? { updateId,
     destination: String(update.message.chat.id), now: now() } : null;
   try {

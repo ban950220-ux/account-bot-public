@@ -573,3 +573,12 @@ CREATE TRIGGER IF NOT EXISTS plan_archive_immutable_update BEFORE UPDATE ON clou
 BEGIN SELECT RAISE(ABORT,'plan archive event immutable'); END;
 CREATE TRIGGER IF NOT EXISTS plan_archive_immutable_delete BEFORE DELETE ON cloud_plan_archive_events
 BEGIN SELECT RAISE(ABORT,'plan archive event immutable'); END;
+
+-- Replies precomputed by the Actions job (see docs/free-plan-precompute.md).
+CREATE TABLE IF NOT EXISTS cloud_precomputed (
+    kind TEXT PRIMARY KEY CHECK (kind IN ('recurring','weekly_cmd','recommend','daily_report','weekly_report')),
+    period_key TEXT NOT NULL,
+    input_fingerprint TEXT NOT NULL CHECK (length(input_fingerprint) BETWEEN 1 AND 512),
+    computed_at TEXT NOT NULL,
+    body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 100000)
+);
