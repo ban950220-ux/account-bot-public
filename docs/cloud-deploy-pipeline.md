@@ -97,3 +97,4 @@ GitHub 설정(사용자 완료): Environment `production`, Secret `CLOUDFLARE_AP
 | 2026-11-26 | `94d57c6` | `8d167ae7-20c8-47ae-b6ec-26f2512e730a` | Workers Logs(요청별 CPU 기록) 켬 | run 성공, 운영 100%, webhook 403. 직전 버전 `6f1fcf2d-53b6-4b59-9db6-15c01251d246` |
 | 2026-11-26 | `6c8ff4d` | `4b08901d-819a-43de-9a32-308d523b22c3` | 요청별 명령 이름 기록 | run 성공, 운영 100%, webhook 403. 직전 버전 `8d167ae7-20c8-47ae-b6ec-26f2512e730a` |
 | 2026-11-27 | `3ecc950` | `58109861-6554-4359-be47-953dd27561de` | `localeCompare` 제거(안 A 1단계) | run #29 성공, 운영 100%, webhook 403. 직전 버전 `4b08901d-819a-43de-9a32-308d523b22c3` |
+| 2026-11-28 | `c4a1ec7` | `873d542c-f689-46aa-830f-81821b759bbe` | 미리 계산 결과 읽기 경로(안 A 3단계), D1 `cloud_precomputed`는 run #32 | run #33 성공, 운영 100%, webhook 403. 직전 버전 `58109861-6554-4359-be47-953dd27561de` |

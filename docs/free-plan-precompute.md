@@ -358,3 +358,17 @@ Cloudflare Worker
 - 운영 migration
 - 배포 뒤 webhook 403 확인
 - Actions가 아직 결과를 만들지 않으므로 배포해도 운영 동작은 같다.
+
+### 3단계 운영 반영 (2026-11-28)
+
+- Actions `migrate` run #32 (`2026-11-28-precomputed.sql`)
+  - 복구 지점(bookmark): `0000007b-00000000-00005131-ecfa9cc21220e8456ff972e88ccafe55`
+  - 적용 전후 계획 85·revision 265·outbox 145행이 같다. DB 객체는 135 → 137로 늘었다(테이블과 자동 인덱스).
+  - `cloud_precomputed` 생성 확인
+- Actions `deploy` run #33 (master `c4a1ec7`)
+  - Worker 테스트 통과
+  - 새 버전 `873d542c-f689-46aa-830f-81821b759bbe` 운영 100%
+  - webhook 무인증 POST 403
+- 되돌릴 직전 버전: `58109861-6554-4359-be47-953dd27561de`
+- 저장된 결과가 아직 없으므로 운영 동작은 이전과 같다.
+- **3단계 완료.**
